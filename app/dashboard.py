@@ -981,7 +981,7 @@ with tab5:
         for i, em in enumerate(emotion_labels):
             target_text, _ = emotion_targets[em]
             fig.add_annotation(
-                x=i, y=-0.28,
+                x=i, y=-0.46,
                 xref="x", yref="paper",
                 text=f"<b>{target_text}</b>",
                 showarrow=False,
@@ -992,15 +992,15 @@ with tab5:
         fig.update_layout(
             height=248,
             **_layout(
-                margin=dict(t=20, b=72, l=60, r=20),
+                margin=dict(t=20, b=96, l=60, r=20),
                 xaxis=dict(
                     showgrid=False, zeroline=False,
                     tickfont=dict(size=12, color=TEXT_MUTED),
                     tickangle=0,
                     title_font=dict(size=11, color=TEXT_MUTED),
                     linecolor=BORDER, tickcolor=BORDER,
-                    side="top",
-                    ticklabelstandoff=8,
+                    side="bottom",
+                    ticklabelstandoff=10,
                 ),
                 yaxis=dict(showgrid=False, zeroline=False,
                            tickfont=dict(size=12, color=TEXT_MUTED),
