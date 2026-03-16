@@ -46,6 +46,33 @@ BRAND_COLORS = {
     "AT&T Mobility": GREEN,
 }
 PASTEL = ["#BFD7FF", "#BFEFE8", "#D8C7FF", "#FFD7C2", "#FFF1B8"]
+
+# ── Elegant SVG icons for KPI cards (stroke-only, minimal line style) ─────────
+_SVG = lambda path, color=ACCENT: (
+    f'<svg width="26" height="26" viewBox="0 0 24 24" fill="none" '
+    f'stroke="{color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+    f'{path}</svg>'
+)
+KPI_ICON_POSTS = _SVG(
+    '<rect x="3" y="12" width="4" height="9" rx="1"/>'
+    '<rect x="10" y="7" width="4" height="14" rx="1"/>'
+    '<rect x="17" y="3" width="4" height="18" rx="1"/>'
+)
+KPI_ICON_SHARE = _SVG(
+    '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+    '<line x1="9" y1="10" x2="15" y2="10"/>'
+    '<line x1="9" y1="13" x2="13" y2="13"/>'
+)
+KPI_ICON_NSS = _SVG(
+    '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>'
+    '<polyline points="16 7 22 7 22 13"/>'
+)
+KPI_ICON_COMPLAINT = _SVG(
+    '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>'
+    '<line x1="12" y1="9" x2="12" y2="13"/>'
+    '<circle cx="12" cy="17" r="0.5" fill="currentColor"/>',
+    color=RED,
+)
 PLATFORM_COLORS = {
     "Reddit":    "#FF4500",
     "Instagram": "#C13584",
@@ -255,7 +282,7 @@ def kpi(label: str, value: str, delta: str = "", delta_positive: bool | None = N
     elif delta_positive is False:
         css = "neg"
     delta_html = f'<div class="kpi-delta {css}">{delta}</div>' if delta else ""
-    icon_html = f'<div style="font-size:22px;margin-bottom:4px">{icon}</div>' if icon else ""
+    icon_html = f'<div style="margin-bottom:6px;line-height:1">{icon}</div>' if icon else ""
     st.markdown(f"""
     <div class="kpi-card">
       {icon_html}
@@ -576,14 +603,14 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 with tab1:
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        kpi("Total Posts (All Brands)", f"{total_posts:,}", icon="📊")
+        kpi("Total Posts (All Brands)", f"{total_posts:,}", icon=KPI_ICON_POSTS)
     with k2:
         kpi(
             "T-Mobile Conversation Share",
             f"{tm_share:.0f}%",
             delta=f"{tm_share - safe_val(verizon,'conversation_share_pct'):+.1f}pp vs Verizon",
             delta_positive=tm_share >= safe_val(verizon, "conversation_share_pct"),
-            icon="💬",
+            icon=KPI_ICON_SHARE,
         )
     with k3:
         kpi(
@@ -591,7 +618,7 @@ with tab1:
             f"{tm_nss:+.1f}",
             delta=f"{nss_gap_vz:+.1f} pts vs Verizon",
             delta_positive=nss_gap_vz > 0,
-            icon="📈",
+            icon=KPI_ICON_NSS,
         )
     with k4:
         complaint_gap = tm_complaint - safe_val(verizon, "complaint_pct")
@@ -600,7 +627,7 @@ with tab1:
             f"{tm_complaint:.1f}%",
             delta=f"{complaint_gap:+.1f}pp vs Verizon",
             delta_positive=complaint_gap < 0,
-            icon="⚠️",
+            icon=KPI_ICON_COMPLAINT,
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
