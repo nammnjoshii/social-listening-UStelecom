@@ -17,7 +17,7 @@ Intent = Literal["Complaint", "Inquiry", "Praise", "Recommendation"]
 Emotion = Literal["Frustration", "Satisfaction", "Confusion", "Excitement"]
 BrandConfidence = Literal["High", "Medium", "Low"]
 ClassificationConfidence = Literal["High", "Medium", "Low"]
-ClassificationStatus = Literal["success", "failed", "retry", "flagged"]
+ClassificationStatus = Literal["success", "failed", "retry", "flagged", "credit_error"]
 
 
 class RawPost(BaseModel):

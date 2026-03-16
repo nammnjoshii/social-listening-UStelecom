@@ -1,17 +1,5 @@
 """Streamlit Executive Dashboard — U.S. Telecom Social Listening.
 
-Inspired by Brandwatch / Talkwalker / Meltwater dashboard patterns.
-Layout: wide landscape, structured as:
-  1. Header & KPIs
-  2. Total Conversations / Share of Voice
-  3. Sentiment Overview
-  4. Top Issues + Platform Breakdown
-  5. Topic Word Cloud (treemap) by Brand
-  6. Trend Analysis
-  7. Taxonomy Breakdown
-  8. Competitive Intelligence
-  9. Executive Insights
-
 Launch:
     python3 -m streamlit run app/dashboard.py
 """
@@ -19,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 
 import pandas as pd
@@ -48,33 +35,28 @@ SURFACE     = "#FFFFFF"
 BORDER      = "#E5E7EB"
 TEXT        = "#111827"
 TEXT_MUTED  = "#6B7280"
-ACCENT      = "#1FBBCC"   # Procogia teal
-GREEN       = "#95C100"   # Procogia green
-SLATE       = "#374151"   # neutral dark
+ACCENT      = "#1FBBCC"
+GREEN       = "#95C100"
+SLATE       = "#374151"
 RED         = "#EF4444"
 
-# Per-brand colors
 BRAND_COLORS = {
     "T-Mobile US":   ACCENT,
     "Verizon":       SLATE,
     "AT&T Mobility": GREEN,
 }
-
-# Pastel palette for stacked/grouped series
 PASTEL = ["#BFD7FF", "#BFEFE8", "#D8C7FF", "#FFD7C2", "#FFF1B8"]
-
-# Platform colors
 PLATFORM_COLORS = {
-    "Reddit":     "#FF4500",
-    "Instagram":  "#C13584",
-    "AppReview":  "#007AFF",
-    "YouTube":    "#FF0000",
-    "X":          "#000000",
-    "Twitter":    "#1DA1F2",
+    "Reddit":    "#FF4500",
+    "Instagram": "#C13584",
+    "AppReview": "#007AFF",
+    "YouTube":   "#FF0000",
+    "X":         "#000000",
+    "Twitter":   "#1DA1F2",
 }
 
 # ─────────────────────────────────────────────
-# Global CSS — Procogia Apple-style
+# Global CSS
 # ─────────────────────────────────────────────
 st.markdown(f"""
 <style>
@@ -95,7 +77,6 @@ st.markdown(f"""
       text-transform: uppercase;
   }}
   #MainMenu, footer, header {{ visibility: hidden; }}
-
   h1 {{
       font-size: 22px !important;
       font-weight: 700 !important;
@@ -122,11 +103,7 @@ st.markdown(f"""
       margin-top: 0 !important;
       margin-bottom: 8px !important;
   }}
-  hr {{
-      border: none;
-      border-top: 1px solid {BORDER};
-      margin: 20px 0;
-  }}
+  hr {{ border: none; border-top: 1px solid {BORDER}; margin: 20px 0; }}
   .kpi-card {{
       background: {SURFACE};
       border: 1px solid {BORDER};
@@ -157,13 +134,6 @@ st.markdown(f"""
   }}
   .kpi-delta.pos {{ color: {ACCENT}; }}
   .kpi-delta.neg {{ color: {RED}; }}
-
-  .section-card {{
-      background: {SURFACE};
-      border: 1px solid {BORDER};
-      border-radius: 12px;
-      padding: 18px 18px 10px;
-  }}
   .chart-label {{
       font-size: 10px;
       font-weight: 600;
@@ -203,16 +173,6 @@ st.markdown(f"""
       margin-bottom: 10px;
       font-style: italic;
   }}
-  .brand-badge {{
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-right: 6px;
-  }}
   [data-testid="stDataFrame"] {{
       border-radius: 10px;
       overflow: hidden;
@@ -247,7 +207,7 @@ st.markdown(f"""
 
 
 # ─────────────────────────────────────────────
-# Plotly theme helpers
+# Helpers
 # ─────────────────────────────────────────────
 def _layout(**overrides) -> dict:
     base = dict(
@@ -256,27 +216,16 @@ def _layout(**overrides) -> dict:
         font=dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
                   color=TEXT, size=12),
         margin=dict(t=16, b=16, l=8, r=8),
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            bordercolor="rgba(0,0,0,0)",
-            font=dict(size=11, color=TEXT_MUTED),
-        ),
-        xaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(size=11, color=TEXT_MUTED),
-            title_font=dict(size=11, color=TEXT_MUTED),
-            linecolor=BORDER,
-            tickcolor=BORDER,
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor=BORDER,
-            zeroline=False,
-            tickfont=dict(size=11, color=TEXT_MUTED),
-            title_font=dict(size=11, color=TEXT_MUTED),
-            linecolor="rgba(0,0,0,0)",
-        ),
+        legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
+                    font=dict(size=11, color=TEXT_MUTED)),
+        xaxis=dict(showgrid=False, zeroline=False,
+                   tickfont=dict(size=11, color=TEXT_MUTED),
+                   title_font=dict(size=11, color=TEXT_MUTED),
+                   linecolor=BORDER, tickcolor=BORDER),
+        yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False,
+                   tickfont=dict(size=11, color=TEXT_MUTED),
+                   title_font=dict(size=11, color=TEXT_MUTED),
+                   linecolor="rgba(0,0,0,0)"),
     )
     base.update(overrides)
     return base
@@ -288,12 +237,12 @@ def _chart(fig: go.Figure, height: int = 280, **layout_overrides):
 
 
 def kpi(label: str, value: str, delta: str = "", delta_positive: bool | None = None):
-    css_class = ""
+    css = ""
     if delta_positive is True:
-        css_class = "pos"
+        css = "pos"
     elif delta_positive is False:
-        css_class = "neg"
-    delta_html = f'<div class="kpi-delta {css_class}">{delta}</div>' if delta else ""
+        css = "neg"
+    delta_html = f'<div class="kpi-delta {css}">{delta}</div>' if delta else ""
     st.markdown(f"""
     <div class="kpi-card">
       <div class="kpi-label">{label}</div>
@@ -307,6 +256,10 @@ def chart_label(text: str):
     st.markdown(f'<div class="chart-label">{text}</div>', unsafe_allow_html=True)
 
 
+def safe_val(df: pd.DataFrame, col: str, default=0):
+    return df[col].iloc[0] if not df.empty and col in df.columns else default
+
+
 # ─────────────────────────────────────────────
 # DB helpers
 # ─────────────────────────────────────────────
@@ -317,7 +270,6 @@ def _get_conn():
 
 @st.cache_data(ttl=300)
 def _query(sql: str, params=None) -> pd.DataFrame:
-    sql = sql.replace("%s", "?")
     conn = _get_conn()
     return pd.read_sql(sql, conn, params=params)
 
@@ -343,13 +295,12 @@ with st.sidebar:
         st.stop()
 
     run_options = run_df["run_id"].tolist()
-    run_labels = {r: f"{r[:8]}… ({t[:10]})" for r, t in zip(run_df["run_id"], run_df["completed_at"].astype(str))}
+    run_labels  = {r: f"{r[:8]}… ({t[:10]})" for r, t in zip(run_df["run_id"], run_df["completed_at"].astype(str))}
     selected_run = st.selectbox("Pipeline Run", run_options, format_func=lambda x: run_labels.get(x, x))
 
     st.markdown(f"<hr style='border-color:{BORDER};margin:16px 0 12px'>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:10px;color:{TEXT_MUTED}'>Taxonomy v1.0.0 · Schema v1.0.0</div>", unsafe_allow_html=True)
     st.markdown(f"<div style='font-size:10px;color:{TEXT_MUTED};margin-top:4px'>Refreshes every 5 min</div>", unsafe_allow_html=True)
-
     st.markdown(f"<hr style='border-color:{BORDER};margin:16px 0 12px'>", unsafe_allow_html=True)
     st.markdown(f"""
     <div style='font-size:10px;color:{TEXT_MUTED};line-height:1.8'>
@@ -361,22 +312,19 @@ with st.sidebar:
 
 
 # ─────────────────────────────────────────────
-# Load data
+# Data loaders
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_metrics(run_id: str) -> pd.DataFrame:
     return _query("SELECT * FROM brand_metrics WHERE pipeline_run_id = ? ORDER BY brand", (run_id,))
 
-
 @st.cache_data(ttl=300)
 def load_trends(run_id: str) -> pd.DataFrame:
     return _query("SELECT * FROM daily_trends WHERE pipeline_run_id = ? ORDER BY trend_date, brand", (run_id,))
 
-
 @st.cache_data(ttl=300)
 def load_topics(run_id: str) -> pd.DataFrame:
     return _query("SELECT * FROM top_topics WHERE pipeline_run_id = ? ORDER BY brand, rank", (run_id,))
-
 
 @st.cache_data(ttl=300)
 def load_insight(run_id: str) -> dict:
@@ -386,12 +334,10 @@ def load_insight(run_id: str) -> dict:
     raw = df["insight_json"].iloc[0]
     return json.loads(raw) if isinstance(raw, str) else raw
 
-
 @st.cache_data(ttl=300)
 def load_run_meta(run_id: str) -> dict:
     df = _query("SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,))
     return df.iloc[0].to_dict() if not df.empty else {}
-
 
 @st.cache_data(ttl=300)
 def load_platform_data(run_id: str) -> pd.DataFrame:
@@ -401,7 +347,6 @@ def load_platform_data(run_id: str) -> pd.DataFrame:
         (run_id,),
     )
 
-
 @st.cache_data(ttl=300)
 def load_sentiment_by_brand(run_id: str) -> pd.DataFrame:
     return _query(
@@ -410,23 +355,29 @@ def load_sentiment_by_brand(run_id: str) -> pd.DataFrame:
         (run_id,),
     )
 
+@st.cache_data(ttl=300)
+def load_taxonomy_trend(run_id: str) -> pd.DataFrame:
+    """Posts grouped by date × brand × pillar × category for trend charts."""
+    return _query(
+        "SELECT DATE(timestamp) as date, brand, pillar, category, theme, COUNT(*) as post_count "
+        "FROM posts WHERE pipeline_run_id = ? AND timestamp IS NOT NULL "
+        "GROUP BY DATE(timestamp), brand, pillar, category, theme",
+        (run_id,),
+    )
 
-metrics_df   = load_metrics(selected_run)
-trends_df    = load_trends(selected_run)
-topics_df    = load_topics(selected_run)
-insight_data = load_insight(selected_run)
-run_meta     = load_run_meta(selected_run)
-platform_df  = load_platform_data(selected_run)
+
+metrics_df    = load_metrics(selected_run)
+trends_df     = load_trends(selected_run)
+topics_df     = load_topics(selected_run)
+insight_data  = load_insight(selected_run)
+run_meta      = load_run_meta(selected_run)
+platform_df   = load_platform_data(selected_run)
 sentiment_raw = load_sentiment_by_brand(selected_run)
+tax_trend_df  = load_taxonomy_trend(selected_run)
 
 if metrics_df.empty:
     st.warning("No metrics found for this run.")
     st.stop()
-
-
-def safe_val(df: pd.DataFrame, col: str, default=0):
-    return df[col].iloc[0] if not df.empty and col in df.columns else default
-
 
 tmobile = metrics_df[metrics_df["brand"] == "T-Mobile US"]
 verizon = metrics_df[metrics_df["brand"] == "Verizon"]
@@ -435,90 +386,89 @@ att     = metrics_df[metrics_df["brand"] == "AT&T Mobility"]
 period_start = run_meta.get("period_start", "")[:10]
 period_end   = run_meta.get("period_end", "")[:10]
 post_count   = run_meta.get("post_count", 0)
+nss_tm  = safe_val(tmobile, "net_sentiment_score")
+nss_vz  = safe_val(verizon, "net_sentiment_score")
+nss_att = safe_val(att, "net_sentiment_score")
 
 
 # ─────────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────────
-st.markdown(
-    f"<h1>Telecom Social Listening Dashboard</h1>",
-    unsafe_allow_html=True,
-)
+st.markdown("<h1>Telecom Social Listening Dashboard</h1>", unsafe_allow_html=True)
 st.markdown(
     f"<div style='font-size:13px;color:{TEXT_MUTED};margin-bottom:4px'>"
     f"Client: <strong style='color:{ACCENT}'>T-Mobile US</strong>"
     f"&nbsp;·&nbsp; Competitors: Verizon, AT&T Mobility"
     f"&nbsp;·&nbsp; {period_start} – {period_end}"
-    f"&nbsp;·&nbsp; <strong style='color:{TEXT}'>{post_count:,}</strong> posts analysed"
-    f"</div>" if isinstance(post_count, int) else
-    f"<div style='font-size:13px;color:{TEXT_MUTED};margin-bottom:4px'>"
-    f"Client: <strong style='color:{ACCENT}'>T-Mobile US</strong>"
-    f"&nbsp;·&nbsp; Competitors: Verizon, AT&T Mobility</div>",
+    f"</div>",
     unsafe_allow_html=True,
 )
 st.markdown(f"<hr style='border-color:{BORDER};margin:14px 0 20px'>", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
-# SECTION 1: TOTAL CONVERSATIONS (7 days)
+# SECTION 1: T-MOBILE SUMMARY CARDS
 # ─────────────────────────────────────────────
-st.markdown("<h2>Total Conversations (7 Days)</h2>", unsafe_allow_html=True)
+st.markdown("<h2>T-Mobile US — At a Glance</h2>", unsafe_allow_html=True)
 
-total_posts = int(metrics_df["total_posts"].sum())
-nss_tm  = safe_val(tmobile, "net_sentiment_score")
-nss_vz  = safe_val(verizon, "net_sentiment_score")
-nss_att = safe_val(att, "net_sentiment_score")
-nss_gap = nss_tm - nss_vz
+total_posts   = int(metrics_df["total_posts"].sum())
+tm_share      = safe_val(tmobile, "conversation_share_pct")
+tm_nss        = safe_val(tmobile, "net_sentiment_score")
+tm_complaint  = safe_val(tmobile, "complaint_pct")
+nss_gap_vz    = nss_tm - nss_vz
 
-# KPI row
-k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1, k2, k3, k4 = st.columns(4)
 with k1:
-    kpi("Total Posts", f"{total_posts:,}")
+    kpi("Total Posts (All Brands)", f"{total_posts:,}")
 with k2:
-    kpi("T-Mobile Share",
-        f"{safe_val(tmobile, 'conversation_share_pct'):.0f}%",
-        delta="Client")
+    kpi(
+        "T-Mobile Conversation Share",
+        f"{tm_share:.0f}%",
+        delta=f"{tm_share - safe_val(verizon,'conversation_share_pct'):+.1f}pp vs Verizon",
+        delta_positive=tm_share >= safe_val(verizon, "conversation_share_pct"),
+    )
 with k3:
-    kpi("Verizon Share",
-        f"{safe_val(verizon, 'conversation_share_pct'):.0f}%")
+    kpi(
+        "T-Mobile NSS",
+        f"{tm_nss:+.1f}",
+        delta=f"{nss_gap_vz:+.1f} pts vs Verizon",
+        delta_positive=nss_gap_vz > 0,
+    )
 with k4:
-    kpi("AT&T Share",
-        f"{safe_val(att, 'conversation_share_pct'):.0f}%")
-with k5:
-    kpi("T-Mobile NSS",
-        f"{nss_tm:+.1f}",
-        delta=f"{nss_gap:+.1f} vs Verizon",
-        delta_positive=nss_gap > 0)
-with k6:
-    kpi("T-Mobile Complaint Rate",
-        f"{safe_val(tmobile, 'complaint_pct'):.1f}%",
-        delta=f"{safe_val(tmobile,'complaint_pct') - safe_val(verizon,'complaint_pct'):+.1f}pp vs Verizon",
-        delta_positive=safe_val(tmobile,'complaint_pct') < safe_val(verizon,'complaint_pct'))
+    complaint_gap = tm_complaint - safe_val(verizon, "complaint_pct")
+    kpi(
+        "T-Mobile Complaint Rate",
+        f"{tm_complaint:.1f}%",
+        delta=f"{complaint_gap:+.1f}pp vs Verizon",
+        delta_positive=complaint_gap < 0,
+    )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Conversation share donut + NSS bar side by side
-c1a, c1b = st.columns([1, 1])
+# Share of Voice + NSS bar
+c1a, c1b = st.columns(2)
 with c1a:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     chart_label("Share of Voice")
     fig = px.pie(
-        metrics_df,
-        names="brand", values="total_posts",
-        color="brand", color_discrete_map=BRAND_COLORS,
-        hole=0.56,
+        metrics_df, names="brand", values="total_posts",
+        color="brand", color_discrete_map=BRAND_COLORS, hole=0.56,
     )
     fig.update_traces(
         textinfo="label+percent",
         textfont=dict(size=12, color=TEXT),
         marker=dict(line=dict(color=SURFACE, width=3)),
     )
+    # Make Verizon label readable against its dark slice
+    for trace in fig.data:
+        new_colors = []
+        for brand in trace.labels if hasattr(trace, "labels") and trace.labels is not None else []:
+            new_colors.append("#FFFFFF" if brand == "Verizon" else TEXT)
+        if new_colors:
+            trace.textfont = dict(size=12, color=new_colors)
     fig.update_layout(showlegend=False, **_layout(margin=dict(t=10, b=10, l=8, r=8)))
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    st.markdown("</div>", unsafe_allow_html=True)
 
 with c1b:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     chart_label("Net Sentiment Score by Brand")
     nss_df = metrics_df[["brand", "net_sentiment_score"]].copy()
     fig = go.Figure(go.Bar(
@@ -528,37 +478,24 @@ with c1b:
         marker_line_width=0,
         text=nss_df["net_sentiment_score"].apply(lambda x: f"{x:+.1f}"),
         textposition="outside",
-        textfont=dict(size=13, color=TEXT, family="-apple-system, sans-serif"),
+        textfont=dict(size=13, color=TEXT),
     ))
     fig.add_hline(y=0, line_dash="dot", line_color=BORDER, line_width=1)
     _chart(fig, yaxis_title="NSS (Positive% − Negative%)", xaxis_title="")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
-# SECTION 2: SENTIMENT OVERVIEW
+# SECTION 2: SENTIMENT TREND
 # ─────────────────────────────────────────────
 st.markdown("<h2>Sentiment Trend</h2>", unsafe_allow_html=True)
-st.markdown(
-    f"<div style='font-size:12px;color:{TEXT_MUTED};margin-bottom:12px'>"
-    f"<strong style='color:{RED}'>Negative</strong> &nbsp;|&nbsp; "
-    f"<strong style='color:{TEXT_MUTED}'>Neutral</strong> &nbsp;|&nbsp; "
-    f"<strong style='color:{GREEN}'>Positive</strong>"
-    f"</div>",
-    unsafe_allow_html=True,
-)
 
 s1, s2 = st.columns([2, 1])
-
 with s1:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    chart_label("7-Day Net Sentiment Trend")
+    chart_label("10-Week Net Sentiment Trend")
     if not trends_df.empty:
         fig = px.line(
-            trends_df,
-            x="trend_date", y="net_sentiment_score",
-            color="brand", color_discrete_map=BRAND_COLORS,
-            markers=True,
+            trends_df, x="trend_date", y="net_sentiment_score",
+            color="brand", color_discrete_map=BRAND_COLORS, markers=True,
             labels={"net_sentiment_score": "NSS", "trend_date": "", "brand": ""},
         )
         fig.add_hline(y=0, line_dash="dot", line_color=BORDER, line_width=1)
@@ -566,144 +503,85 @@ with s1:
         _chart(fig)
     else:
         st.info("No trend data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 with s2:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     chart_label("Sentiment Distribution by Brand")
     if not sentiment_raw.empty:
-        sentiment_colors = {"Positive": GREEN, "Neutral": TEXT_MUTED, "Negative": RED}
         fig = px.bar(
-            sentiment_raw,
-            x="brand", y="post_count",
-            color="sentiment",
-            color_discrete_map=sentiment_colors,
+            sentiment_raw, x="brand", y="post_count", color="sentiment",
+            color_discrete_map={"Positive": GREEN, "Neutral": TEXT_MUTED, "Negative": RED},
             barmode="stack",
             labels={"post_count": "Posts", "brand": "", "sentiment": ""},
         )
         fig.update_traces(marker_line_width=0)
         _chart(fig)
     else:
-        # Fallback from brand_metrics
-        sent_cols = ["brand", "positive_pct", "neutral_pct", "negative_pct"]
-        sdf = metrics_df[sent_cols].melt(id_vars="brand", var_name="sentiment", value_name="pct")
+        sdf = metrics_df[["brand", "positive_pct", "neutral_pct", "negative_pct"]].melt(
+            id_vars="brand", var_name="sentiment", value_name="pct"
+        )
         sdf["sentiment"] = sdf["sentiment"].str.replace("_pct", "").str.capitalize()
         fig = px.bar(
-            sdf, x="brand", y="pct", color="sentiment",
-            barmode="stack",
+            sdf, x="brand", y="pct", color="sentiment", barmode="stack",
             color_discrete_map={"Positive": GREEN, "Neutral": TEXT_MUTED, "Negative": RED},
             labels={"pct": "% Posts", "brand": "", "sentiment": ""},
         )
         fig.update_traces(marker_line_width=0)
         _chart(fig)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
-# SECTION 3: TOP ISSUES + PLATFORM BREAKDOWN
+# SECTION 3: TOP CATEGORIES & PLATFORM BREAKDOWN
 # ─────────────────────────────────────────────
-st.markdown("<h2>Top Issues & Platform Breakdown</h2>", unsafe_allow_html=True)
+st.markdown("<h2>Top Categories & Platform Breakdown</h2>", unsafe_allow_html=True)
 i1, i2 = st.columns([1, 1])
 
 with i1:
-    st.markdown("<div class='section-card' style='min-height:300px'>", unsafe_allow_html=True)
-    chart_label("Top Issues (by Conversation Volume)")
-
-    # Build top issues from topics: aggregate by pillar/category
+    chart_label("Top Categories by Conversation Volume")
     if not topics_df.empty:
-        top_issues = (
-            topics_df.groupby("topic", as_index=False)["post_count"]
-            .sum()
+        top_cats = (
+            topics_df[topics_df["category"] != "Uncategorized"]
+            .groupby("category", as_index=False)["post_count"].sum()
             .sort_values("post_count", ascending=False)
             .head(8)
             .reset_index(drop=True)
         )
-        html_issues = ""
-        for i, row in top_issues.iterrows():
-            # Truncate long topic names
-            topic_text = row["topic"]
-            if len(topic_text) > 80:
-                topic_text = topic_text[:77] + "…"
-            html_issues += f"""
-            <div class="issue-item">
-              <div class="issue-num">{i + 1}</div>
-              <div class="issue-text">{topic_text}
-                <span style="color:{TEXT_MUTED};font-size:11px;margin-left:6px">{int(row['post_count'])} posts</span>
-              </div>
-            </div>"""
-        st.markdown(html_issues, unsafe_allow_html=True)
-    else:
-        st.info("No topic data available.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with i2:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    chart_label("Platform Breakdown")
-    if not platform_df.empty:
-        plat_total = platform_df.groupby("platform", as_index=False)["post_count"].sum()
-        plat_colors = [PLATFORM_COLORS.get(p, ACCENT) for p in plat_total["platform"]]
         fig = go.Figure(go.Bar(
-            y=plat_total["platform"],
-            x=plat_total["post_count"],
+            y=top_cats["category"],
+            x=top_cats["post_count"],
             orientation="h",
-            marker_color=plat_colors,
+            marker_color=ACCENT,
             marker_line_width=0,
-            text=plat_total["post_count"],
+            text=top_cats["post_count"],
             textposition="outside",
             textfont=dict(size=12, color=TEXT),
         ))
-        _chart(fig, xaxis_title="Posts", yaxis_title="",
-               margin=dict(t=10, b=10, l=70, r=40),
-               yaxis=dict(showgrid=False, tickfont=dict(size=12, color=TEXT)))
+        _chart(fig, height=300, xaxis_title="Posts",
+               margin=dict(t=10, b=10, l=150, r=50),
+               yaxis=dict(showgrid=False, zeroline=False, autorange="reversed",
+                          tickfont=dict(size=11, color=TEXT),
+                          linecolor="rgba(0,0,0,0)"))
     else:
-        st.info("No platform data.")
+        st.info("No category data available.")
 
-    # Platform × Brand breakdown
+with i2:
+    chart_label("Platform Breakdown by Brand")
     if not platform_df.empty:
-        st.markdown(f"<div style='font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:{TEXT_MUTED};margin:12px 0 6px'>By Brand</div>", unsafe_allow_html=True)
-        fig2 = px.bar(
-            platform_df,
-            x="platform", y="post_count",
+        fig = px.bar(
+            platform_df, x="platform", y="post_count",
             color="brand", barmode="group",
             color_discrete_map=BRAND_COLORS,
             labels={"post_count": "Posts", "platform": "", "brand": ""},
         )
-        fig2.update_traces(marker_line_width=0)
-        _chart(fig2, margin=dict(t=6, b=10, l=8, r=8))
-    st.markdown("</div>", unsafe_allow_html=True)
+        fig.update_traces(marker_line_width=0)
+        _chart(fig, margin=dict(t=10, b=10, l=8, r=8))
+    else:
+        st.info("No platform data.")
 
 
 # ─────────────────────────────────────────────
-# SECTION 4: TOPIC WORD CLOUD (Treemap) by Brand
+# SECTION 4: COMMON CATEGORIES BY BRAND
 # ─────────────────────────────────────────────
-st.markdown("<h2>Common Topics by Brand</h2>", unsafe_allow_html=True)
-
-STOP_WORDS = {
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
-    "been", "being", "have", "has", "had", "do", "does", "did", "will",
-    "would", "could", "should", "may", "might", "shall", "can", "need",
-    "vs", "vs.", "due", "per", "via", "than", "into", "up", "after",
-    "over", "its", "their", "my", "your", "our", "his", "her", "this",
-    "that", "these", "those", "it", "he", "she", "they", "we", "i",
-    "not", "no", "if", "then", "so", "yet", "both", "either", "nor",
-    "while", "about", "against", "between", "under", "through", "during",
-    "before", "between", "without", "around",
-}
-
-
-def extract_keywords(topics_series: pd.Series, weights: pd.Series | None = None) -> pd.DataFrame:
-    """Extract word frequencies from topic strings for treemap/word-cloud."""
-    freq: dict[str, float] = {}
-    for i, topic in enumerate(topics_series):
-        w = float(weights.iloc[i]) if weights is not None else 1.0
-        words = re.findall(r"[a-zA-Z]{3,}", str(topic).lower())
-        for word in words:
-            if word not in STOP_WORDS:
-                freq[word] = freq.get(word, 0) + w
-    df = pd.DataFrame({"word": list(freq.keys()), "count": list(freq.values())})
-    return df.sort_values("count", ascending=False).head(40)
-
+st.markdown("<h2>Common Categories by Brand</h2>", unsafe_allow_html=True)
 
 brand_tabs = st.tabs(["T-Mobile US", "Verizon", "AT&T Mobility"])
 for tab, brand_name, brand_color in zip(
@@ -712,22 +590,20 @@ for tab, brand_name, brand_color in zip(
     [ACCENT, SLATE, GREEN],
 ):
     with tab:
-        bdf = topics_df[topics_df["brand"] == brand_name].copy()
+        bdf = topics_df[
+            (topics_df["brand"] == brand_name) &
+            (topics_df["category"] != "Uncategorized")
+        ].copy()
         if bdf.empty:
-            st.info(f"No topic data for {brand_name}")
+            st.info(f"No category data for {brand_name}")
             continue
 
-        kw_df = extract_keywords(bdf["topic"], weights=bdf["post_count"])
-        if kw_df.empty:
-            st.info("No keywords extracted.")
-            continue
+        cat_df = bdf.groupby("category", as_index=False)["post_count"].sum()
+        cat_df = cat_df.sort_values("post_count", ascending=False)
 
-        # Treemap as word cloud substitute
         fig = px.treemap(
-            kw_df,
-            path=["word"],
-            values="count",
-            color="count",
+            cat_df, path=["category"], values="post_count",
+            color="post_count",
             color_continuous_scale=[[0, "#F0F9FA"], [1, brand_color]],
         )
         fig.update_traces(
@@ -735,39 +611,30 @@ for tab, brand_name, brand_color in zip(
             marker=dict(line=dict(width=1, color=SURFACE)),
         )
         fig.update_coloraxes(showscale=False)
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(t=10, b=10, l=4, r=4),
-            height=260,
-        )
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", margin=dict(t=10, b=10, l=4, r=4), height=260)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 # ─────────────────────────────────────────────
 # SECTION 5: TREND ANALYSIS
 # ─────────────────────────────────────────────
-st.markdown("<h2>Trend Analysis (7 Days)</h2>", unsafe_allow_html=True)
+st.markdown("<h2>Trend Analysis (10 Weeks)</h2>", unsafe_allow_html=True)
 
 t1, t2 = st.columns(2)
-
 with t1:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     chart_label("Conversation Volume Trend")
     if not trends_df.empty:
         fig = px.line(
             trends_df, x="trend_date", y="post_count",
-            color="brand", color_discrete_map=BRAND_COLORS,
-            markers=True,
+            color="brand", color_discrete_map=BRAND_COLORS, markers=True,
             labels={"post_count": "Posts", "trend_date": "", "brand": ""},
         )
         fig.update_traces(line=dict(width=2.5), marker=dict(size=7))
         _chart(fig)
     else:
         st.info("No trend data.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 with t2:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     chart_label("Complaint Trend")
     if not trends_df.empty:
         fig = px.area(
@@ -780,12 +647,9 @@ with t2:
         _chart(fig)
     else:
         st.info("No trend data.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 t3, t4 = st.columns(2)
-
 with t3:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     chart_label("Frustration vs Satisfaction Trend")
     if not trends_df.empty:
         emotion_trend_df = trends_df.melt(
@@ -795,10 +659,8 @@ with t3:
         )
         emotion_trend_df["emotion"] = emotion_trend_df["emotion"].str.replace("_pct", "").str.capitalize()
         fig = px.line(
-            emotion_trend_df,
-            x="trend_date", y="pct",
-            color="brand", line_dash="emotion",
-            color_discrete_map=BRAND_COLORS,
+            emotion_trend_df, x="trend_date", y="pct",
+            color="brand", line_dash="emotion", color_discrete_map=BRAND_COLORS,
             markers=True,
             labels={"pct": "% Posts", "trend_date": "", "brand": "", "emotion": ""},
         )
@@ -806,14 +668,12 @@ with t3:
         _chart(fig)
     else:
         st.info("No trend data.")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 with t4:
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    chart_label("Intent & Emotion Distribution")
-    intent_df = metrics_df[["brand", "complaint_pct", "inquiry_pct", "praise_pct", "recommendation_pct"]].melt(
-        id_vars="brand", var_name="intent", value_name="pct"
-    )
+    chart_label("Intent Distribution by Brand")
+    intent_df = metrics_df[
+        ["brand", "complaint_pct", "inquiry_pct", "praise_pct", "recommendation_pct"]
+    ].melt(id_vars="brand", var_name="intent", value_name="pct")
     intent_df["intent"] = intent_df["intent"].str.replace("_pct", "").str.capitalize()
     fig = px.bar(
         intent_df, x="brand", y="pct", color="intent",
@@ -822,72 +682,183 @@ with t4:
     )
     fig.update_traces(marker_line_width=0)
     _chart(fig)
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
 # SECTION 6: TAXONOMY BREAKDOWN
 # ─────────────────────────────────────────────
-st.markdown("<h2>Topic Taxonomy</h2>", unsafe_allow_html=True)
+st.markdown("<h2>Taxonomy Breakdown</h2>", unsafe_allow_html=True)
 
 if not topics_df.empty:
-    tax1, tax2 = st.columns([1, 1])
+    tax_tabs = st.tabs(["By Pillar", "By Category", "By Theme"])
 
-    with tax1:
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        chart_label("Topic Volume by Pillar")
-        pillar_df = topics_df.groupby(["brand", "pillar"], as_index=False)["post_count"].sum()
-        fig = px.bar(
-            pillar_df, x="pillar", y="post_count",
-            color="brand", barmode="group",
-            color_discrete_map=BRAND_COLORS,
-            labels={"post_count": "Posts", "pillar": "", "brand": ""},
+    # ── By Pillar ─────────────────────────────────────────────────────────
+    with tax_tabs[0]:
+        pillar_brand = topics_df[topics_df["pillar"] != "Uncategorized"].groupby(
+            ["brand", "pillar"], as_index=False
+        )["post_count"].sum()
+
+        p1, p2 = st.columns(2)
+        with p1:
+            chart_label("Pillar Volume — Comparison by Brand")
+            fig = px.bar(
+                pillar_brand, x="pillar", y="post_count",
+                color="brand", barmode="group",
+                color_discrete_map=BRAND_COLORS,
+                labels={"post_count": "Posts", "pillar": "", "brand": ""},
+            )
+            fig.update_traces(marker_line_width=0)
+            _chart(fig, xaxis_tickangle=-20)
+
+        with p2:
+            chart_label("Pillar Trend Over Time")
+            if not tax_trend_df.empty:
+                pillar_trend = (
+                    tax_trend_df[tax_trend_df["pillar"] != "Uncategorized"]
+                    .groupby(["date", "pillar"], as_index=False)["post_count"].sum()
+                )
+                # Keep top 5 pillars by total volume
+                top_pillars = (
+                    pillar_trend.groupby("pillar")["post_count"].sum()
+                    .nlargest(5).index.tolist()
+                )
+                pillar_trend = pillar_trend[pillar_trend["pillar"].isin(top_pillars)]
+                fig = px.line(
+                    pillar_trend, x="date", y="post_count", color="pillar",
+                    markers=True,
+                    labels={"post_count": "Posts", "date": "", "pillar": ""},
+                )
+                fig.update_traces(line=dict(width=2), marker=dict(size=6))
+                _chart(fig)
+            else:
+                st.info("No trend data.")
+
+    # ── By Category ───────────────────────────────────────────────────────
+    with tax_tabs[1]:
+        cat_brand = topics_df[topics_df["category"] != "Uncategorized"].groupby(
+            ["brand", "category"], as_index=False
+        )["post_count"].sum()
+        # Top 10 categories by total volume
+        top_cats_list = (
+            cat_brand.groupby("category")["post_count"].sum()
+            .nlargest(10).index.tolist()
         )
-        fig.update_traces(marker_line_width=0)
-        _chart(fig, xaxis_tickangle=-15)
-        st.markdown("</div>", unsafe_allow_html=True)
+        cat_brand_top = cat_brand[cat_brand["category"].isin(top_cats_list)]
 
-    with tax2:
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        chart_label("Top Topics per Brand")
-        brand_tab_topics = st.tabs(["T-Mobile US", "Verizon", "AT&T Mobility"])
-        for tab, brand_name in zip(brand_tab_topics, ["T-Mobile US", "Verizon", "AT&T Mobility"]):
-            with tab:
-                bdf = topics_df[topics_df["brand"] == brand_name].head(8).copy()
-                if bdf.empty:
-                    st.info(f"No data for {brand_name}")
-                    continue
-                display = bdf[["rank", "pillar", "topic", "post_count", "topic_share_pct", "is_emerging"]].copy()
-                display.columns = ["#", "Pillar", "Topic", "Posts", "Share%", "New"]
-                display["New"] = display["New"].map({True: "★", False: "", 1: "★", 0: ""})
-                display["Share%"] = display["Share%"].apply(lambda x: f"{x:.1f}%")
-                st.dataframe(display, use_container_width=True, hide_index=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            chart_label("Category Volume — Comparison by Brand")
+            fig = px.bar(
+                cat_brand_top, x="category", y="post_count",
+                color="brand", barmode="group",
+                color_discrete_map=BRAND_COLORS,
+                labels={"post_count": "Posts", "category": "", "brand": ""},
+            )
+            fig.update_traces(marker_line_width=0)
+            _chart(fig, xaxis_tickangle=-25)
 
-    # Category drill-down
-    pillars = sorted(topics_df["pillar"].unique().tolist())
-    sel_pillar = st.selectbox("Drill down by Pillar → Category", pillars, key="pillar_select")
-    cat_df = (
-        topics_df[topics_df["pillar"] == sel_pillar]
-        .groupby(["brand", "category"], as_index=False)["post_count"].sum()
-    )
-    if not cat_df.empty:
-        fig = px.bar(
-            cat_df, x="category", y="post_count",
-            color="brand", barmode="group",
-            color_discrete_map=BRAND_COLORS,
-            labels={"post_count": "Posts", "category": "", "brand": ""},
-            title=f"Category Breakdown — {sel_pillar}",
-        )
-        fig.update_traces(marker_line_width=0)
-        fig.update_layout(title_font=dict(size=12, color=TEXT_MUTED), title_x=0)
-        _chart(fig)
+        with c2:
+            chart_label("Category Trend Over Time (Top 5)")
+            if not tax_trend_df.empty:
+                cat_trend = (
+                    tax_trend_df[tax_trend_df["category"] != "Uncategorized"]
+                    .groupby(["date", "category"], as_index=False)["post_count"].sum()
+                )
+                top5_cats = (
+                    cat_trend.groupby("category")["post_count"].sum()
+                    .nlargest(5).index.tolist()
+                )
+                cat_trend = cat_trend[cat_trend["category"].isin(top5_cats)]
+                fig = px.line(
+                    cat_trend, x="date", y="post_count", color="category",
+                    markers=True,
+                    labels={"post_count": "Posts", "date": "", "category": ""},
+                )
+                fig.update_traces(line=dict(width=2), marker=dict(size=6))
+                _chart(fig)
+            else:
+                st.info("No trend data.")
 
-    # Emotion heatmap
-    st.markdown("<div class='section-card' style='margin-top:0'>", unsafe_allow_html=True)
+    # ── By Theme ──────────────────────────────────────────────────────────
+    with tax_tabs[2]:
+        if "theme" in topics_df.columns:
+            theme_brand = topics_df[
+                (topics_df["theme"] != "Uncategorized") & (topics_df["theme"].notna())
+            ].groupby(["brand", "theme"], as_index=False)["post_count"].sum()
+            top_themes = (
+                theme_brand.groupby("theme")["post_count"].sum()
+                .nlargest(10).index.tolist()
+            )
+            theme_brand_top = theme_brand[theme_brand["theme"].isin(top_themes)]
+
+            th1, th2 = st.columns(2)
+            with th1:
+                chart_label("Theme Volume — Comparison by Brand")
+                fig = px.bar(
+                    theme_brand_top, x="theme", y="post_count",
+                    color="brand", barmode="group",
+                    color_discrete_map=BRAND_COLORS,
+                    labels={"post_count": "Posts", "theme": "", "brand": ""},
+                )
+                fig.update_traces(marker_line_width=0)
+                _chart(fig, xaxis_tickangle=-25)
+
+            with th2:
+                chart_label("Theme Trend Over Time (Top 5)")
+                if not tax_trend_df.empty and "theme" in tax_trend_df.columns:
+                    theme_trend = (
+                        tax_trend_df[
+                            (tax_trend_df["theme"] != "Uncategorized") &
+                            (tax_trend_df["theme"].notna())
+                        ].groupby(["date", "theme"], as_index=False)["post_count"].sum()
+                    )
+                    top5_themes = (
+                        theme_trend.groupby("theme")["post_count"].sum()
+                        .nlargest(5).index.tolist()
+                    )
+                    theme_trend = theme_trend[theme_trend["theme"].isin(top5_themes)]
+                    fig = px.line(
+                        theme_trend, x="date", y="post_count", color="theme",
+                        markers=True,
+                        labels={"post_count": "Posts", "date": "", "theme": ""},
+                    )
+                    fig.update_traces(line=dict(width=2), marker=dict(size=6))
+                    _chart(fig)
+                else:
+                    st.info("No theme trend data.")
+        else:
+            st.info("Theme data not available.")
+
+    # ── Per-brand topic table ──────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    chart_label("Top Topics per Brand")
+    brand_tab_topics = st.tabs(["T-Mobile US", "Verizon", "AT&T Mobility"])
+    for tab, brand_name in zip(brand_tab_topics, ["T-Mobile US", "Verizon", "AT&T Mobility"]):
+        with tab:
+            bdf = topics_df[topics_df["brand"] == brand_name].head(8).copy()
+            if bdf.empty:
+                st.info(f"No data for {brand_name}")
+                continue
+            display = bdf[["rank", "pillar", "category", "topic", "post_count", "topic_share_pct", "is_emerging"]].copy()
+            display.columns = ["#", "Pillar", "Category", "Topic", "Posts", "Share%", "New"]
+            display["New"] = display["New"].map({True: "★", False: "", 1: "★", 0: ""})
+            display["Share%"] = display["Share%"].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(display, use_container_width=True, hide_index=True)
+
+    # ── Emotion Heatmap ────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
     chart_label("Emotion Heatmap by Brand")
+
+    # Targets: Frustration ≤20% | Satisfaction ≥30% | Confusion ≤15% | Excitement ≥20%
     emotion_cols   = ["frustration_pct", "satisfaction_pct", "confusion_pct", "excitement_pct"]
     emotion_labels = ["Frustration", "Satisfaction", "Confusion", "Excitement"]
+    emotion_targets = {
+        "Frustration":  ("↓ target ≤ 20%",  "lower is better"),
+        "Satisfaction": ("↑ target ≥ 30%",  "higher is better"),
+        "Confusion":    ("↓ target ≤ 15%",  "lower is better"),
+        "Excitement":   ("↑ target ≥ 20%",  "higher is better"),
+    }
+
     heat_data = metrics_df.set_index("brand")[emotion_cols].rename(
         columns=dict(zip(emotion_cols, emotion_labels))
     )
@@ -900,8 +871,30 @@ if not topics_df.empty:
     )
     fig.update_coloraxes(showscale=False)
     fig.update_traces(textfont=dict(size=13, color=TEXT))
-    _chart(fig)
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Add target annotations below each x-axis column using paper coords
+    for i, em in enumerate(emotion_labels):
+        target_text, _ = emotion_targets[em]
+        fig.add_annotation(
+            x=i, y=-0.18,
+            xref="x", yref="paper",
+            text=f"<b>{target_text}</b>",
+            showarrow=False,
+            font=dict(size=10, color=TEXT_MUTED,
+                      family="-apple-system, BlinkMacSystemFont, sans-serif"),
+            align="center",
+        )
+
+    # Fix: pass yaxis as override to _layout to avoid duplicate kwarg crash
+    fig.update_layout(
+        **_layout(
+            margin=dict(t=16, b=64, l=8, r=8),
+            yaxis=dict(showgrid=False, zeroline=False,
+                       tickfont=dict(size=11, color=TEXT_MUTED),
+                       linecolor="rgba(0,0,0,0)", gridcolor=BORDER),
+        )
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 # ─────────────────────────────────────────────
@@ -916,14 +909,14 @@ for comp in ["Verizon", "AT&T Mobility"]:
     nss_gap_c     = safe_val(tmobile, "net_sentiment_score") - safe_val(comp_row, "net_sentiment_score")
     complaint_gap = safe_val(tmobile, "complaint_pct") - safe_val(comp_row, "complaint_pct")
     comp_data.append({
-        "Competitor":        comp,
-        "T-Mobile NSS":      f"{safe_val(tmobile, 'net_sentiment_score'):+.1f}",
-        f"{comp} NSS":       f"{safe_val(comp_row, 'net_sentiment_score'):+.1f}",
-        "NSS Gap":           f"{nss_gap_c:+.1f}",
-        "Complaint Gap":     f"{complaint_gap:+.1f}pp",
-        "T-Mobile Praise":   f"{safe_val(tmobile, 'praise_pct'):.1f}%",
-        f"{comp} Praise":    f"{safe_val(comp_row, 'praise_pct'):.1f}%",
-        "Verdict":           "T-Mobile leads" if nss_gap_c > 0 else "T-Mobile trails",
+        "Competitor":       comp,
+        "T-Mobile NSS":     f"{safe_val(tmobile,'net_sentiment_score'):+.1f}",
+        f"{comp} NSS":      f"{safe_val(comp_row,'net_sentiment_score'):+.1f}",
+        "NSS Gap":          f"{nss_gap_c:+.1f}",
+        "Complaint Gap":    f"{complaint_gap:+.1f}pp",
+        "T-Mobile Praise":  f"{safe_val(tmobile,'praise_pct'):.1f}%",
+        f"{comp} Praise":   f"{safe_val(comp_row,'praise_pct'):.1f}%",
+        "Verdict":          "T-Mobile leads" if nss_gap_c > 0 else "T-Mobile trails",
     })
 if comp_data:
     st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
@@ -969,9 +962,7 @@ if insight_data:
         if gaps and gaps.get("narrative"):
             chart_label("Sentiment Narrative")
             st.markdown(
-                f'<div class="insight-quote">'
-                f'"{gaps.get("narrative","")}"'
-                f'</div>',
+                f'<div class="insight-quote">"{gaps.get("narrative","")}"</div>',
                 unsafe_allow_html=True,
             )
 
@@ -996,7 +987,7 @@ st.markdown(f"<hr style='border-color:{BORDER};margin:32px 0 16px'>", unsafe_all
 st.markdown(
     f"<div style='font-size:11px;color:{TEXT_MUTED};text-align:center;padding-bottom:24px'>"
     f"Powered by Claude (claude-sonnet-4-6) &nbsp;·&nbsp; Procogia &nbsp;·&nbsp; "
-    f"Inspired by Brandwatch, Talkwalker, Meltwater &nbsp;·&nbsp; Data refreshes every 5 min"
+    f"Data refreshes every 5 min"
     f"</div>",
     unsafe_allow_html=True,
 )

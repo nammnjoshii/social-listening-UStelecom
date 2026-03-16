@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 import anthropic
@@ -26,6 +27,16 @@ from src.config import cfg
 from src.models import BrandTaggedPost, PostClassification
 
 logger = logging.getLogger(__name__)
+
+
+class CreditExhaustedError(Exception):
+    """Raised when the Anthropic credit balance is exhausted.
+    Distinct from APIError — halts classification immediately rather than
+    producing failed records that corrupt the quality gate.
+    """
+    def __init__(self, message: str, classified_so_far: int = 0):
+        super().__init__(message)
+        self.classified_so_far = classified_so_far
 
 # ─────────────────────────────────────────────
 # Prompt template (unified — all 5 tasks)
@@ -94,8 +105,8 @@ def _build_prompt(post: BrandTaggedPost) -> str:
 # ─────────────────────────────────────────────
 @retry(
     retry=retry_if_exception_type(anthropic.RateLimitError),
-    wait=wait_exponential(multiplier=1, min=2, max=16),
-    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=2, min=10, max=90),
+    stop=stop_after_attempt(8),
 )
 async def _call_claude(
     client: anthropic.AsyncAnthropic,
@@ -141,6 +152,12 @@ async def _call_claude(
             raise
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("Parse error for post %s: %s", post.post_id, e)
+            return _failed_record(post, run_id)
+        except anthropic.BadRequestError as e:
+            if "credit balance" in str(e).lower():
+                logger.critical("Credit balance exhausted — stopping classification immediately")
+                raise CreditExhaustedError(str(e)) from e
+            logger.error("Claude BadRequest for post %s: %s", post.post_id, e)
             return _failed_record(post, run_id)
         except anthropic.APIError as e:
             logger.error("Claude API error for post %s: %s", post.post_id, e)
@@ -189,9 +206,11 @@ async def _classify_all_async(
 def classify_posts(
     posts: list[BrandTaggedPost],
     run_id: str,
+    on_batch_complete: callable = None,
 ) -> list[PostClassification]:
     """
     Classify all posts. Processes in batches of cfg.claude_batch_size.
+    Calls on_batch_complete(batch_results) after each batch if provided.
     Returns list of PostClassification records (including failed ones).
     """
     results: list[PostClassification] = []
@@ -206,8 +225,25 @@ def classify_posts(
         total_batches = (len(posts) + batch_size - 1) // batch_size
         logger.info("Classifying batch %d/%d (%d posts)", batch_num, total_batches, len(batch))
 
-        batch_results = asyncio.run(_classify_all_async(batch, run_id))
+        try:
+            batch_results = asyncio.run(_classify_all_async(batch, run_id))
+        except CreditExhaustedError:
+            logger.critical(
+                "Credit exhausted during batch %d/%d — stopping. %d posts classified so far.",
+                batch_num, total_batches, len(results),
+            )
+            raise CreditExhaustedError(
+                f"Credit exhausted at batch {batch_num}/{total_batches}",
+                classified_so_far=len(results),
+            )
         results.extend(batch_results)
+
+        if on_batch_complete:
+            on_batch_complete(batch_results)
+
+        # Pace batches to stay within 30k input tokens/minute rate limit
+        if i + batch_size < len(posts):
+            time.sleep(20)
 
     elapsed = (datetime.now(timezone.utc) - start).total_seconds()
     success = sum(1 for r in results if r.classification_status == "success")

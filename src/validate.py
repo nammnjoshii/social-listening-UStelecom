@@ -34,8 +34,18 @@ def run_quality_checks(
         raise QualityGateError("No classified records — cannot proceed.")
 
     # ── Confidence gate ───────────────────────────────────────────────
-    low_confidence = [r for r in records if r.confidence == "Low"]
-    low_pct = len(low_confidence) / total
+    # Exclude failed/credit_error posts from the denominator — these are
+    # API failures, not bad classifications. Counting them inflates the
+    # low-confidence rate and triggers false quality gate halts.
+    classifiable = [r for r in records if r.classification_status in ("success", "flagged")]
+    classifiable_total = len(classifiable)
+    if classifiable_total == 0:
+        logger.warning(
+            "No successfully classified posts — all %d records are failed/credit_error. "
+            "Skipping confidence gate.", total,
+        )
+    low_confidence = [r for r in classifiable if r.confidence == "Low"]
+    low_pct = len(low_confidence) / classifiable_total if classifiable_total else 0.0
     stats["low_confidence_count"] = len(low_confidence)
     stats["low_confidence_pct"] = round(low_pct * 100, 2)
 

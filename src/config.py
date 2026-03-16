@@ -14,7 +14,7 @@ class Config:
     claude_api_key: str = field(default_factory=lambda: os.getenv("CLAUDE_API_KEY", ""))
     claude_model: str = "claude-sonnet-4-6"
     claude_max_tokens: int = 512
-    claude_concurrency: int = 5
+    claude_concurrency: int = 3
     claude_batch_size: int = 50
 
     # Database (SQLite — local file, no server required)
@@ -25,18 +25,20 @@ class Config:
     # Instagram: optional — requires Business account token
     instagram_access_token: str = field(default_factory=lambda: os.getenv("INSTAGRAM_ACCESS_TOKEN", ""))
     instagram_business_account_id: str = field(default_factory=lambda: os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", ""))
-    # Twitter/X: optional — requires paid Bearer Token (~$100/month)
+    # Twitter/X API v2: optional — requires paid Bearer Token (~$100/month)
     twitter_bearer_token: str = field(default_factory=lambda: os.getenv("TWITTER_BEARER_TOKEN", ""))
+    # opentwitter / 6551 API: optional — free token at https://6551.io/mcp
+    twitter_6551_token: str = field(default_factory=lambda: os.getenv("TWITTER_TOKEN", ""))
 
     # YouTube: no API key required (uses youtubesearchpython + youtube-comment-downloader)
-    youtube_max_comments_per_video: int = 20
+    youtube_max_comments_per_video: int = 50
     # App Store reviews: no credentials required (uses google-play-scraper + app-store-scraper)
-    app_review_max_per_app: int = 84
+    app_review_max_per_app: int = 400
 
     # Pipeline parameters
-    posts_per_platform: int = 500
+    posts_per_platform: int = 2000
     collection_buffer_multiplier: int = 2      # collect 2× target to allow attrition
-    lookback_days: int = 7
+    lookback_days: int = 70                    # 10-week historical window
     min_post_words: int = 15
     max_hashtags: int = 5
     near_duplicate_threshold: float = 0.85     # Jaccard similarity for MinHash LSH

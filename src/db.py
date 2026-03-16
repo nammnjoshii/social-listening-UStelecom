@@ -98,6 +98,24 @@ def write_posts(records: list[PostClassification], run_id: str) -> int:
     return written
 
 
+def get_classified_post_ids() -> set[str]:
+    """Return post_ids already successfully classified in any prior run.
+    Used by the pipeline resume filter to skip already-done posts.
+    Only includes success/flagged — failed and credit_error are retried.
+    """
+    sql = """
+        SELECT DISTINCT post_id FROM posts
+        WHERE classification_status IN ('success', 'flagged')
+    """
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(sql).fetchall()
+        return {row["post_id"] for row in rows}
+    except Exception as e:
+        logger.warning("Could not load classified post IDs (fresh run assumed): %s", e)
+        return set()
+
+
 def write_brand_metrics(metrics: list[AggregatedMetrics]) -> None:
     rows = [(
         m.pipeline_run_id, m.taxonomy_version, m.schema_version,

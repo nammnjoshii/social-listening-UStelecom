@@ -264,11 +264,20 @@ class InstagramCollector:
 # X / Twitter — paid API primary, Nitter RSS fallback
 # ─────────────────────────────────────────────
 
-# Public Nitter instances — tried in order until one succeeds
+# Public Nitter instances — tried in order until one succeeds.
+# Order reflects experiment results (2026-03-16):
+#   nitter.perennialte.ch → HTTP 200, RSS search works (20 tweets/query confirmed)
+#   nitter.net            → HTTP 200 homepage, search may work
+#   nitter.cz             → HTTP 200 homepage, search returns Cloudflare 403
+#   nitter.poast.org      → HTTP 503
+#   others                → DNS failure or 502
 _NITTER_INSTANCES: list[str] = [
+    "https://nitter.perennialte.ch",  # confirmed working 2026-03-16
+    "https://nitter.net",
+    "https://nitter.it",
+    "https://nitter.cz",
     "https://nitter.privacydev.net",
     "https://nitter.poast.org",
-    "https://nitter.cz",
     "https://nitter.1d4.us",
     "https://nitter.kavin.rocks",
 ]
@@ -286,14 +295,26 @@ _NITTER_HEADERS = {
 }
 
 
+_6551_BASE = "https://ai.6551.io"
+
+_6551_SEARCH_PAYLOADS: list[dict] = [
+    {"keywords": "T-Mobile plan OR T-Mobile 5G OR T-Mobile coverage", "lang": "en", "excludeRetweets": True},
+    {"keywords": "Verizon plan OR Verizon 5G OR Verizon coverage",     "lang": "en", "excludeRetweets": True},
+    {"keywords": "ATT plan OR AT&T 5G OR AT&T coverage",               "lang": "en", "excludeRetweets": True},
+    {"keywords": "switch carrier T-Mobile OR switch to Verizon OR switch ATT", "lang": "en", "excludeRetweets": True},
+]
+
+
 class TwitterCollector:
     """
-    Collects tweets via X API v2 (paid) or Nitter RSS feeds (credential-free).
+    Collects tweets via X API v2 (paid), opentwitter/6551 API, or Nitter RSS.
 
     Strategy (in order):
-      1. Paid API v2 — if TWITTER_BEARER_TOKEN is set in .env.
-      2. Nitter RSS — queries multiple public Nitter instances for X search results
-         without any credentials. Falls back across instances if one is down.
+      1. Paid API v2       — if TWITTER_BEARER_TOKEN is set in .env.
+      2. opentwitter/6551  — if TWITTER_TOKEN is set in .env.
+                             Up to 100 tweets/request, date/lang/engagement filters.
+                             Get a free token at: https://6551.io/mcp
+      3. Nitter RSS        — credential-free fallback; ~20 tweets/query.
     """
 
     # ── Strategy 1: paid API v2 ──────────────────────────────────────
@@ -342,7 +363,68 @@ class TwitterCollector:
             logger.error("Twitter paid API error: %s", e)
         return posts[:limit]
 
-    # ── Strategy 2: Nitter RSS (credential-free) ─────────────────────
+    # ── Strategy 2: opentwitter / 6551 API ───────────────────────────
+    def _collect_6551(self, limit: int) -> list[RawPost]:
+        since = _since_timestamp()
+        posts: list[RawPost] = []
+        headers = {
+            "Authorization": f"Bearer {cfg.twitter_6551_token}",
+            "Content-Type": "application/json",
+        }
+        seen_ids: set[str] = set()
+
+        for payload in _6551_SEARCH_PAYLOADS:
+            if len(posts) >= limit:
+                break
+            body = {
+                **payload,
+                "product": "Latest",
+                "maxResults": 100,
+                "sinceDate": since.strftime("%Y-%m-%d"),
+                "untilDate": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            }
+            try:
+                r = requests.post(
+                    f"{_6551_BASE}/open/twitter_search",
+                    json=body,
+                    headers=headers,
+                    timeout=15,
+                )
+                r.raise_for_status()
+                for tweet in r.json().get("data", []):
+                    text = tweet.get("text", "")
+                    if not text or not _keyword_matches(text):
+                        continue
+                    tweet_id = tweet.get("id", "")
+                    post_id = _make_post_id("X", tweet_id or hashlib.sha256(text[:40].encode()).hexdigest()[:16])
+                    if post_id in seen_ids:
+                        continue
+                    seen_ids.add(post_id)
+                    try:
+                        ts = datetime.fromisoformat(tweet["createdAt"].replace("Z", "+00:00"))
+                    except Exception:
+                        ts = datetime.now(timezone.utc)
+                    posts.append(RawPost(
+                        post_id=post_id,
+                        platform="X",
+                        timestamp=ts,
+                        raw_text=text,
+                        author_id=_anonymize(tweet.get("userScreenName", "unknown")),
+                        engagement_metrics={
+                            "like_count":    tweet.get("favoriteCount", 0),
+                            "retweet_count": tweet.get("retweetCount", 0),
+                            "reply_count":   tweet.get("replyCount", 0),
+                        },
+                        brand_keywords_matched=_keyword_matches(text),
+                    ))
+            except requests.RequestException as e:
+                logger.error("X (6551) error for '%s': %s", payload["keywords"][:40], e)
+            time.sleep(1)
+
+        logger.info("X (opentwitter/6551) collected %d posts", len(posts))
+        return posts[:limit]
+
+    # ── Strategy 3: Nitter RSS (credential-free) ─────────────────────
     def _probe_nitter_instance(self, base: str) -> bool:
         """Return True if this Nitter instance responds to a simple probe."""
         try:
@@ -446,7 +528,10 @@ class TwitterCollector:
         if cfg.twitter_bearer_token:
             logger.info("X: using paid API v2")
             return self._collect_paid(limit)
-        logger.info("X: no bearer token — trying Nitter RSS")
+        if cfg.twitter_6551_token:
+            logger.info("X: using opentwitter/6551 API")
+            return self._collect_6551(limit)
+        logger.info("X: no token set — trying Nitter RSS")
         return self._collect_nitter(limit)
 
 
@@ -458,19 +543,26 @@ class TwitterCollector:
 
 # (query, brand_hint) — brand_hint=None means multi-brand / no prepend
 YOUTUBE_SEARCH_QUERIES: list[tuple[str, str | None]] = [
-    ("T-Mobile review 2024 OR T-Mobile review 2025", "T-Mobile US"),
-    ("T-Mobile customer service experience", "T-Mobile US"),
+    ("T-Mobile review 2025 OR T-Mobile review 2026", "T-Mobile US"),
+    ("T-Mobile customer service experience 2025 OR 2026", "T-Mobile US"),
     ("T-Mobile 5G coverage problems OR T-Mobile network issues", "T-Mobile US"),
-    ("Verizon review 2024 OR Verizon review 2025", "Verizon"),
-    ("Verizon customer service experience", "Verizon"),
+    ("T-Mobile billing problem OR T-Mobile overcharged", "T-Mobile US"),
+    ("T-Mobile plan price increase OR T-Mobile deal", "T-Mobile US"),
+    ("Verizon review 2025 OR Verizon review 2026", "Verizon"),
+    ("Verizon customer service experience 2025 OR 2026", "Verizon"),
     ("Verizon 5G coverage problems OR Verizon network issues", "Verizon"),
-    ("AT&T review 2024 OR AT&T review 2025", "AT&T Mobility"),
-    ("AT&T customer service experience", "AT&T Mobility"),
-    ("T-Mobile vs Verizon vs AT&T comparison", None),
-    ("best cell phone carrier US 2025", None),
-    ("switch carrier T-Mobile Verizon ATT", None),
+    ("Verizon price increase OR Verizon billing issue", "Verizon"),
+    ("AT&T review 2025 OR AT&T review 2026", "AT&T Mobility"),
+    ("AT&T customer service experience 2025 OR 2026", "AT&T Mobility"),
+    ("AT&T 5G coverage problems OR AT&T network issues", "AT&T Mobility"),
+    ("AT&T FirstNet OR AT&T fiber bundle", "AT&T Mobility"),
+    ("T-Mobile vs Verizon vs AT&T comparison 2025", None),
+    ("best cell phone carrier US 2025 OR 2026", None),
+    ("switch carrier T-Mobile Verizon ATT 2025 OR 2026", None),
+    ("unlimited plan comparison T-Mobile Verizon ATT", None),
+    ("prepaid vs postpaid carrier comparison US", None),
 ]
-_YOUTUBE_MAX_VIDEOS_PER_QUERY = 3  # 3 videos × 11 queries × 20 comments = up to 660
+_YOUTUBE_MAX_VIDEOS_PER_QUERY = 5  # 5 videos × 18 queries × 50 comments = up to 4,500
 
 
 class YouTubeCollector:
@@ -819,7 +911,7 @@ class TrustpilotCollector:
             slug = company["slug"]
             brand_posts: list[RawPost] = []
 
-            for page in range(1, 6):  # up to 5 pages × 20 reviews = 100 per brand
+            for page in range(1, 51):  # up to 50 pages × 20 reviews = 1,000 per brand (10-week window)
                 if len(brand_posts) >= per_brand:
                     break
                 reviews = self._fetch_page(slug, page)

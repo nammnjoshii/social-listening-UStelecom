@@ -5,7 +5,7 @@ Implements all metrics from PANDAS-DATA-PIPELINE.md and WORKFLOW.md §Step 7–8
   - Net Sentiment Score (NSS)
   - Intent & emotion distributions
   - Complaint-to-Praise ratio
-  - 7-day trend deltas
+  - 10-week trend deltas
   - Top topics per brand
   - Competitive gap (T-Mobile vs. Verizon, AT&T)
   - Emerging topic detection
@@ -177,7 +177,7 @@ def compute_daily_trends(
     records: list[PostClassification],
     run_id: str,
 ) -> pd.DataFrame:
-    """Daily trend snapshot per brand for the 7-day window."""
+    """Daily trend snapshot per brand for the full lookback window."""
     df = _build_df(records)
     if df.empty:
         return pd.DataFrame()

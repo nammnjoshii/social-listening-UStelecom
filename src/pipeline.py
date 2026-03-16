@@ -29,6 +29,27 @@ logger = logging.getLogger("pipeline")
 console = Console()
 
 
+def _preflight_credit_check() -> None:
+    """Make a minimal 1-token test call to verify Claude credits are available.
+    Raises CreditExhaustedError immediately if the account is out of credits.
+    Called before ingestion to avoid wasting 10+ minutes collecting data.
+    """
+    import anthropic as _anthropic
+    client = _anthropic.Anthropic(api_key=cfg.claude_api_key)
+    try:
+        client.messages.create(
+            model=cfg.claude_model,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    except _anthropic.BadRequestError as e:
+        if "credit balance" in str(e).lower():
+            raise classify.CreditExhaustedError(str(e))
+    except Exception:
+        # Network errors, auth issues, etc. — preflight is best-effort; don't block the run
+        logger.warning("Preflight check encountered unexpected error — proceeding anyway", exc_info=True)
+
+
 def run(dry_run: bool = False, experiment: bool = False) -> str:
     run_id = str(uuid.uuid4())
     period_end = datetime.now(timezone.utc)
@@ -40,6 +61,17 @@ def run(dry_run: bool = False, experiment: bool = False) -> str:
     # ── Step 1: Log run start ─────────────────────────────────────────
     if not dry_run:
         db.log_run_start(run_id, prompt_version=cfg.prompt_version)
+
+    # ── Step 1b: Preflight credit check ──────────────────────────────
+    if not dry_run:
+        try:
+            _preflight_credit_check()
+            console.print("  [dim]✓ Claude credit preflight passed")
+        except classify.CreditExhaustedError as e:
+            console.print(f"[bold red]PREFLIGHT FAILED: Claude credit balance is exhausted.")
+            console.print("[yellow]Top up credits at https://console.anthropic.com and re-run.")
+            logger.critical("Aborting pipeline — credit balance exhausted before ingestion: %s", e)
+            return run_id
 
     # ── Step 2: Ingest ───────────────────────────────────────────────
     console.print("[cyan]Step 1/7 — Ingesting posts from all platforms...")
@@ -60,13 +92,40 @@ def run(dry_run: bool = False, experiment: bool = False) -> str:
     tagged_posts, unresolved = brand.tag_posts(clean_posts)
     console.print(f"  {len(tagged_posts)} tagged | {len(unresolved)} unresolved (excluded)")
 
+    # ── Step 4b: Resume filter — skip already-classified posts ────────
+    if not dry_run:
+        already_done = db.get_classified_post_ids()
+        if already_done:
+            before = len(tagged_posts)
+            tagged_posts = [p for p in tagged_posts if p.post_id not in already_done]
+            skipped = before - len(tagged_posts)
+            console.print(f"  [dim]Resume: {skipped} posts already classified — skipping, {len(tagged_posts)} remaining")
+            logger.info("Resume filter: %d already classified, %d remaining", skipped, len(tagged_posts))
+        else:
+            console.print("  [dim]Resume: no prior classifications found — classifying all posts")
+
     # ── Step 5: Classify ─────────────────────────────────────────────
     console.print("[cyan]Step 4/7 — Claude classification (async batches)...")
     if dry_run:
         console.print("  [yellow]DRY RUN — skipping Claude API calls")
         classified = []
     else:
-        classified = classify.classify_posts(tagged_posts, run_id)
+        def _persist_batch(batch_results):
+            persistable = [r for r in batch_results if r.classification_status in ("success", "flagged")]
+            if persistable:
+                db.write_posts(persistable, run_id)
+                console.print(f"  [dim]✓ Batch saved — {len(persistable)} posts written to DB")
+
+        try:
+            classified = classify.classify_posts(tagged_posts, run_id, on_batch_complete=_persist_batch)
+        except classify.CreditExhaustedError as e:
+            console.print(
+                f"[yellow]Credit exhausted mid-run — {e.classified_so_far} posts classified "
+                "before credits ran out. All completed batches already saved to DB."
+            )
+            console.print("[yellow]Top up credits and re-run — resume filter will skip already-classified posts.")
+            logger.warning("Partial run due to credit exhaustion: %d posts classified", e.classified_so_far)
+            classified = []
     console.print(f"  {len(classified)} records classified")
 
     # ── Step 5b: Platform experiment (optional) ───────────────────────
@@ -89,9 +148,8 @@ def run(dry_run: bool = False, experiment: bool = False) -> str:
         return run_id
 
     # ── Step 7: Persist classified posts ─────────────────────────────
-    if not dry_run and classified:
-        console.print("[cyan]  Writing classified posts to DB...")
-        db.write_posts(classified, run_id)
+    # Already written incrementally per batch via on_batch_complete callback.
+    # INSERT OR IGNORE ensures idempotency if pipeline is re-run.
 
     # ── Step 8: Aggregate metrics ─────────────────────────────────────
     console.print("[cyan]Step 6/7 — Aggregating metrics...")
