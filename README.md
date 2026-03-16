@@ -107,7 +107,12 @@ Example:
 git clone https://github.com/nammnjoshii/social-listening-UStelecom.git
 cd social-listening-UStelecom
 python -m venv .venv && source .venv/bin/activate
+
+# Dashboard only
 pip install -r requirements.txt
+
+# Full pipeline (data collection + classification)
+pip install -r requirements-pipeline.txt
 ```
 
 ### 2. Configure environment

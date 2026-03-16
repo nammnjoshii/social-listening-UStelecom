@@ -1,0 +1,42 @@
+# ── Full pipeline dependencies (run locally, not on Streamlit Cloud) ──────────
+# Install with: pip install -r requirements-pipeline.txt
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+anthropic>=0.40.0          # Claude API
+pydantic>=2.6.0            # Data models & validation
+python-dotenv>=1.0.0       # Load .env file
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pandas>=2.2.0              # Aggregation & trend computation
+numpy>=1.26.0              # Numeric ops (required by pandas)
+
+# ── HTTP (used for Reddit free JSON API, Instagram, Twitter) ──────────────────
+requests>=2.31.0
+
+# ── NLP / text processing ─────────────────────────────────────────────────────
+langdetect>=1.0.9          # English language detection
+datasketch>=1.6.4          # MinHash LSH for near-duplicate detection
+
+# ── YouTube collection (credential-free) ──────────────────────────────────────
+youtube-comment-downloader>=0.1.68
+yt-dlp>=2024.1.1
+
+# ── Instagram collection (credential-free) ────────────────────────────────────
+instaloader>=4.10
+
+# ── App Store review collection (credential-free) ─────────────────────────────
+google-play-scraper>=1.2.4
+app-store-scraper>=0.3.5
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+streamlit>=1.32.0
+plotly>=5.20.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tenacity>=8.2.3            # Retry logic with exponential backoff
+rich>=13.7.0               # Pretty CLI output for pipeline runner
