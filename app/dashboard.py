@@ -735,20 +735,28 @@ for tab, brand_name, brand_color in zip(
         cat_df = cat_df.sort_values("post_count", ascending=False)
         brand_total = cat_df["post_count"].sum()
         cat_df["pct"] = (cat_df["post_count"] / brand_total * 100).round(1)
+        n_cats = len(cat_df)
 
         fig = px.treemap(
-            cat_df, path=["category"], values="post_count",
+            cat_df,
+            path=[px.Constant(f"n = {brand_total:,}"), "category"],
+            values="post_count",
             color="post_count",
             color_continuous_scale=[[0, "#F0F9FA"], [1, brand_color]],
             custom_data=["post_count", "pct"],
         )
         fig.update_traces(
+            # Index 0 = root (gray bar) → show "n = xxx" in white
+            # Index 1+ = category tiles → show name + posts + pct
             texttemplate=(
-                "<b>%{label}</b><br>"
-                "%{customdata[0]} posts<br>"
-                "%{customdata[1]:.1f}%"
+                ["%{label}"]
+                + ["<b>%{label}</b><br>%{customdata[0]} posts<br>%{customdata[1]:.1f}%"] * n_cats
             ),
-            textfont=dict(size=13, family="-apple-system, BlinkMacSystemFont, sans-serif"),
+            textfont=dict(
+                size=13,
+                family="-apple-system, BlinkMacSystemFont, sans-serif",
+                color=["white"] + [TEXT] * n_cats,
+            ),
             marker=dict(line=dict(width=1, color=SURFACE)),
             hovertemplate=(
                 "<b>%{label}</b><br>"
