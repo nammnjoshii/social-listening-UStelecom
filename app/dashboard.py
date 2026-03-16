@@ -733,18 +733,30 @@ for tab, brand_name, brand_color in zip(
 
         cat_df = bdf.groupby("category", as_index=False)["post_count"].sum()
         cat_df = cat_df.sort_values("post_count", ascending=False)
+        brand_total = cat_df["post_count"].sum()
+        cat_df["pct"] = (cat_df["post_count"] / brand_total * 100).round(1)
 
         fig = px.treemap(
             cat_df, path=["category"], values="post_count",
             color="post_count",
             color_continuous_scale=[[0, "#F0F9FA"], [1, brand_color]],
+            custom_data=["post_count", "pct"],
         )
         fig.update_traces(
-            textfont=dict(size=14, family="-apple-system, BlinkMacSystemFont, sans-serif"),
+            texttemplate=(
+                "<b>%{label}</b><br>"
+                "%{customdata[0]} posts<br>"
+                "%{customdata[1]:.1f}%"
+            ),
+            textfont=dict(size=13, family="-apple-system, BlinkMacSystemFont, sans-serif"),
             marker=dict(line=dict(width=1, color=SURFACE)),
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "%{customdata[0]} posts · %{customdata[1]:.1f}%<extra></extra>"
+            ),
         )
         fig.update_coloraxes(showscale=False)
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", margin=dict(t=10, b=10, l=4, r=4), height=260)
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", margin=dict(t=10, b=10, l=4, r=4), height=300)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
