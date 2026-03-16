@@ -950,11 +950,11 @@ with tab5:
             labels={"color": "%"},
         )
         fig.update_coloraxes(showscale=False)
-        fig.update_traces(textfont=dict(size=13, color=TEXT))
+        fig.update_traces(textfont=dict(size=14, color=TEXT))
         for i, em in enumerate(emotion_labels):
             target_text, _ = emotion_targets[em]
             fig.add_annotation(
-                x=i, y=-0.18,
+                x=i, y=-0.28,
                 xref="x", yref="paper",
                 text=f"<b>{target_text}</b>",
                 showarrow=False,
@@ -963,12 +963,22 @@ with tab5:
                 align="center",
             )
         fig.update_layout(
-            height=190,
+            height=248,
             **_layout(
-                margin=dict(t=16, b=52, l=8, r=8),
+                margin=dict(t=20, b=72, l=60, r=20),
+                xaxis=dict(
+                    showgrid=False, zeroline=False,
+                    tickfont=dict(size=12, color=TEXT_MUTED),
+                    tickangle=0,
+                    title_font=dict(size=11, color=TEXT_MUTED),
+                    linecolor=BORDER, tickcolor=BORDER,
+                    side="top",
+                    ticklabelstandoff=8,
+                ),
                 yaxis=dict(showgrid=False, zeroline=False,
-                           tickfont=dict(size=11, color=TEXT_MUTED),
-                           linecolor="rgba(0,0,0,0)", gridcolor=BORDER),
+                           tickfont=dict(size=12, color=TEXT_MUTED),
+                           linecolor="rgba(0,0,0,0)", gridcolor=BORDER,
+                           ticklabelstandoff=8),
             )
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
