@@ -18,5 +18,8 @@ htmlcov/
 # Streamlit
 .streamlit/secrets.toml
 
+# Internal agent/tool configs
+.agents/
+
 # OS
 .DS_Store

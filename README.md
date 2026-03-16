@@ -1,205 +1,224 @@
 # U.S. Telecom Social Listening Intelligence Dashboard
 
+> **Client:** T-Mobile US &nbsp;|&nbsp; **Competitors:** AT&T Mobility, Verizon
+
+An AI-powered social listening pipeline that collects, classifies, and visualizes customer conversations about major U.S. telecom providers — surfaced through an executive-grade Streamlit dashboard.
+
+---
+
 ## Overview
 
-This project analyzes social media conversations about major U.S. telecom providers and produces an **executive social listening dashboard**.
+This system ingests social media posts from **Instagram, Reddit, and X (Twitter)**, runs them through a Claude-powered NLP pipeline, and produces a real-time executive dashboard comparing **T-Mobile US** against its competitors on sentiment, complaints, topics, and emotional signals.
 
-> **Client:** T-Mobile US | **Competitors:** AT&T Mobility, Verizon
-
-The analysis focuses on the following companies:
-
-- **T-Mobile US** *(client)*
-- Verizon *(competitor)*
-- AT&T Mobility *(competitor)*
-
-Customer conversations are collected from major social media platforms and analyzed using large language model (LLM) assisted workflows.
-
-The system extracts structured insights including:
-
-- discussion topics
-- sentiment
-- customer intent
-- emotional signals
-
-These insights are organized into a hierarchical taxonomy and aggregated into executive-level metrics.
+| Dimension | Detail |
+|---|---|
+| **Data sources** | Instagram · Reddit · X (Twitter) |
+| **Dataset size** | 1,500 posts (500 per platform, stratified) |
+| **Time window** | Last 7 days |
+| **Brands tracked** | T-Mobile US · Verizon · AT&T Mobility |
+| **Intelligence model** | Claude (Anthropic) |
+| **Dashboard** | Streamlit + Plotly |
+| **Storage** | SQLite (local, zero-config) |
 
 ---
 
-# Business Objective
+## Dashboard
 
-Enable telecom leadership teams to monitor:
+The executive dashboard provides a side-by-side comparison of all three brands across:
 
-- customer sentiment
-- emerging service issues
-- brand perception
-- competitive positioning
-
-The final output is an **executive dashboard comparing the three telecom providers across social listening metrics.**
-
----
-
-# Data Scope
-
-The analysis uses recent social media conversations collected from:
-
-- Instagram
-- Reddit
-- X (Twitter)
-
-### Sampling Strategy
-
-Posts are collected using **stratified sampling** to ensure balanced platform representation.
-
-| Platform | Sample Size |
-|--------|--------|
-Instagram | 500 posts |
-Reddit | 500 posts |
-X (Twitter) | 500 posts |
-
-**Total dataset size:** 1,500 posts
-
-### Time Window
-
-Posts are collected from the **last 7 days**.
-
-### Brand Filter
-
-Posts must reference at least one of:
-
-- **T-Mobile US** *(client)*
-- Verizon *(competitor)*
-- AT&T Mobility *(competitor)*
-
-Posts referencing multiple brands are tagged accordingly.
+- **Conversation share** — who owns the social conversation
+- **Sentiment distribution** — Positive / Neutral / Negative breakdown
+- **Net Sentiment Score (NSS)** — headline competitive KPI
+- **Intent breakdown** — Complaint · Inquiry · Praise · Recommendation
+- **Emotion signals** — Frustration · Satisfaction · Confusion · Excitement
+- **Topic hierarchy** — Pillar → Category → Theme → Topic drill-down
+- **7-day trend charts** — daily movement across all key metrics
 
 ---
 
-# Analytics Framework
+## Analytics Framework
 
-The system extracts four types of insights.
+### Topic Taxonomy
 
-## 1 Topic Hierarchy
+Customer discussions are structured into a four-level hierarchy:
 
-Customer discussions are structured into a taxonomy.
-
+```
+Pillar → Category → Theme → Topic
+```
 
 Example:
 
 | Pillar | Category | Theme | Topic |
-|------|------|------|------|
-Network Performance | Coverage | Urban Coverage | Signal loss in subway |
-Customer Experience | Support | Call Center | Long wait times |
-Pricing & Plans | Billing | Billing Transparency | Unexpected charges |
+|---|---|---|---|
+| Network Performance | Coverage | Urban Coverage | Signal loss in subway |
+| Customer Experience | Support | Call Center | Long wait times |
+| Pricing & Plans | Billing | Billing Transparency | Unexpected charges |
+
+### Sentiment, Intent & Emotion Labels
+
+| Dimension | Labels |
+|---|---|
+| **Sentiment** | Positive · Neutral · Negative |
+| **Intent** | Complaint · Inquiry · Praise · Recommendation |
+| **Emotion** | Frustration · Satisfaction · Confusion · Excitement |
 
 ---
 
-## 2 Sentiment Analysis
+## Project Structure
 
-Classifies post polarity:
-
-- Positive
-- Neutral
-- Negative
-
----
-
-## 3 Customer Intent
-
-Identifies the purpose of the post.
-
-Intent categories:
-
-- Complaint
-- Inquiry
-- Praise
-- Recommendation
-
----
-
-## 4 Emotion Detection
-
-Emotional signals expressed in the post.
-
-Examples:
-
-- Frustration
-- Satisfaction
-- Confusion
-- Excitement
-
----
-
-# Executive Dashboard Metrics
-
-The dashboard provides a comparative view across the three telecom providers.
-
-Key metrics include:
-
-### Conversation Share
-
-Percentage of discussions mentioning each brand.
-
-### Sentiment Distribution
-
-Positive / Neutral / Negative breakdown.
-
-### Topic Hierarchy Analysis
-
-Discussion volume by:
-
-### Customer Intent Trends
-
-Complaint vs praise vs inquiry volume.
-
-### Emotion Signals
-
-Emotional sentiment across brands.
+```
+.
+├── app/
+│   └── dashboard.py          # Streamlit executive dashboard
+├── src/
+│   ├── pipeline.py           # End-to-end pipeline orchestrator
+│   ├── ingest.py             # Social media data collection
+│   ├── clean.py              # Text normalization & deduplication
+│   ├── brand.py              # Brand entity recognition
+│   ├── classify.py           # Claude classification (sentiment/intent/emotion/topic)
+│   ├── aggregate.py          # Metrics aggregation & trend computation
+│   ├── validate.py           # Schema & confidence validation
+│   ├── db.py                 # SQLite read/write helpers
+│   ├── models.py             # Pydantic data models
+│   ├── config.py             # Environment config
+│   └── insights.py           # Executive insight generation
+├── sql/
+│   ├── schema.sql            # Core database schema
+│   └── experiment_schema.sql # Platform experiment tables
+├── data/
+│   └── telecom.db            # SQLite database (pipeline output)
+├── tests/                    # Pytest test suite
+├── skills/                   # Domain reference documentation
+├── versions/                 # Dashboard version snapshots
+├── ARCHITECTURE.md           # System design
+├── WORKFLOW.md               # Step-by-step pipeline workflow
+├── CLAUDE.md                 # Claude prompt engineering guide
+├── OUTPUT-SCHEMA.md          # Canonical output schema
+└── requirements.txt          # Python dependencies
+```
 
 ---
 
-# Comparative Trend Charts (Last 7 Days)
+## Quick Start
 
-The dashboard includes cross-company trend analysis for:
+### 1. Clone & install dependencies
 
-- conversation volume
-- sentiment trends
-- complaint trends
-- emotion signals
-- topic volume
+```bash
+git clone https://github.com/nammnjoshii/social-listening-UStelecom.git
+cd social-listening-UStelecom
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-These charts enable leadership teams to detect:
+### 2. Configure environment
 
-- service disruptions
-- emerging operational issues
-- changes in customer perception
+```bash
+cp .env.example .env
+# Add your CLAUDE_API_KEY to .env
+```
+
+### 3. Run the pipeline
+
+```bash
+python -m src.pipeline
+```
+
+### 4. Launch the dashboard
+
+```bash
+python -m streamlit run app/dashboard.py
+```
+
+The dashboard opens at `http://localhost:8501`.
 
 ---
 
-# Documentation
+## Pipeline Workflow
 
-| File | Purpose |
-|-----|-----|
-CLAUDE.md | Prompt engineering strategy |
-WORKFLOW.md | Data processing pipeline |
-ARCHITECTURE.md | System design |
+```
+Social Media Collection (Instagram · Reddit · X)
+         │
+         ▼
+  Preprocessing & Noise Filtering
+         │
+         ▼
+   Stratified Sampling (500 posts/platform)
+         │
+         ▼
+   Brand Entity Recognition
+         │
+         ▼
+     Claude Intelligence Layer
+  ┌──────────────┬──────────────┐
+  │Topic Discovery│  Sentiment   │
+  │  & Taxonomy   │   Analysis   │
+  │ Construction  │              │
+  ├──────────────┼──────────────┤
+  │   Intent      │   Emotion    │
+  │  Detection    │  Extraction  │
+  └──────────────┴──────────────┘
+         │
+         ▼
+  Aggregation & Trend Engine
+         │
+         ▼
+   Executive Dashboard
+```
 
 ---
 
-# Final Deliverable
+## Output Schema
 
-An **executive social listening dashboard** comparing **T-Mobile US** (client) against its main competitors **AT&T Mobility** and **Verizon**:
+Each classified post is stored as a structured JSON record:
 
-- **T-Mobile US** *(client)*
-- Verizon *(competitor)*
-- AT&T Mobility *(competitor)*
+```json
+{
+  "post_id": "string",
+  "platform": "Instagram | Reddit | X",
+  "brand": "T-Mobile US | Verizon | AT&T Mobility",
+  "sentiment": "Positive | Neutral | Negative",
+  "intent": "Complaint | Inquiry | Praise | Recommendation",
+  "emotion": "Frustration | Satisfaction | Confusion | Excitement",
+  "pillar": "string",
+  "category": "string",
+  "theme": "string",
+  "topic": "string",
+  "confidence": "High | Medium | Low",
+  "pipeline_run_id": "string",
+  "taxonomy_version": "v1.0.0"
+}
+```
 
-The dashboard highlights:
+Full schema definition: [OUTPUT-SCHEMA.md](OUTPUT-SCHEMA.md)
 
-- customer complaints
-- emerging discussion themes
-- sentiment trends
-- brand comparison metrics
+---
 
-This enables leadership teams to quickly identify operational issues and monitor customer experience signals across social media.
+## Documentation
 
+| Document | Description |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design and component overview |
+| [WORKFLOW.md](WORKFLOW.md) | Step-by-step pipeline workflow |
+| [CLAUDE.md](CLAUDE.md) | Claude prompt engineering strategy |
+| [OUTPUT-SCHEMA.md](OUTPUT-SCHEMA.md) | Canonical output schema with field definitions |
+| [skills/TAXONOMY.md](skills/TAXONOMY.md) | Topic taxonomy reference |
 
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Intelligence | Claude (Anthropic) |
+| Data models | Pydantic v2 |
+| Data processing | Pandas · NumPy |
+| Dashboard | Streamlit · Plotly |
+| Storage | SQLite |
+| NLP utilities | langdetect · datasketch |
+| Testing | Pytest |
+
+---
+
+## License
+
+Private — Nammn AI Practice. All rights reserved.
