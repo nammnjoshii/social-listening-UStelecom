@@ -144,22 +144,21 @@ st.markdown(f"""
       display: flex;
       flex-direction: row;
       align-items: center;
-      gap: 16px;
+      justify-content: center;
+      gap: 14px;
   }}
   .kpi-icon {{
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 44px;
-      height: 44px;
-      border-radius: 10px;
-      background: {BG};
   }}
   .kpi-text {{
       display: flex;
       flex-direction: column;
+      align-items: center;
       justify-content: center;
+      text-align: center;
   }}
   .kpi-label {{
       font-size: 10px;
@@ -168,6 +167,7 @@ st.markdown(f"""
       text-transform: uppercase;
       color: {TEXT_MUTED};
       margin-bottom: 4px;
+      text-align: center;
   }}
   .kpi-value {{
       font-size: 26px;
@@ -175,12 +175,14 @@ st.markdown(f"""
       letter-spacing: -1px;
       color: {TEXT};
       line-height: 1;
+      text-align: center;
   }}
   .kpi-delta {{
       font-size: 11px;
       font-weight: 500;
       color: {TEXT_MUTED};
       margin-top: 4px;
+      text-align: center;
   }}
   .kpi-delta.pos {{ color: {ACCENT}; }}
   .kpi-delta.neg {{ color: {RED}; }}
