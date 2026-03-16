@@ -420,28 +420,29 @@ def load_filtered_brand_metrics(run_id: str, cutoff: str | None = None) -> pd.Da
 
 @st.cache_data(ttl=300)
 def load_filtered_topics(run_id: str, cutoff: str | None = None) -> pd.DataFrame:
-    """When no cutoff, load from pre-aggregated top_topics. Otherwise compute from posts."""
-    if cutoff is None:
-        return _query(
-            "SELECT * FROM top_topics WHERE pipeline_run_id = ? ORDER BY brand, rank",
-            (run_id,),
-        )
-    sql = """
+    """Compute topic breakdown from posts table, optionally filtered by date cutoff."""
+    base = (
+        "FROM posts "
+        "WHERE pipeline_run_id = ? "
+        "AND classification_status IN ('success', 'flagged') "
+        "AND pillar != 'Uncategorized'"
+    )
+    params: list = [run_id]
+    if cutoff:
+        base += " AND DATE(timestamp) >= ?"
+        params.append(cutoff)
+    sql = f"""
         SELECT
             brand, pillar, category, theme, topic,
             COUNT(*) AS post_count,
             ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY brand), 2) AS topic_share_pct,
             0 AS is_emerging,
             ROW_NUMBER() OVER (PARTITION BY brand ORDER BY COUNT(*) DESC) AS rank
-        FROM posts
-        WHERE pipeline_run_id = ?
-          AND DATE(timestamp) >= ?
-          AND classification_status IN ('success', 'flagged')
-          AND pillar != 'Uncategorized'
+        {base}
         GROUP BY brand, pillar, category, theme, topic
         ORDER BY brand, post_count DESC
     """
-    return _query(sql, (run_id, cutoff))
+    return _query(sql, tuple(params))
 
 
 # ─────────────────────────────────────────────
