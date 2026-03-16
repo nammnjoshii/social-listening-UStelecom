@@ -379,31 +379,83 @@ def load_taxonomy_trend(run_id: str) -> pd.DataFrame:
     )
 
 
-metrics_df   = load_metrics(selected_run)
-trends_df    = load_trends(selected_run)
-topics_df    = load_topics(selected_run)
-insight_data = load_insight(selected_run)
+@st.cache_data(ttl=300)
+def load_filtered_brand_metrics(run_id: str, cutoff: str | None = None) -> pd.DataFrame:
+    """Compute brand-level metrics from posts table, optionally filtered by date cutoff."""
+    base = (
+        "FROM posts "
+        "WHERE pipeline_run_id = ? "
+        "AND classification_status IN ('success', 'flagged')"
+    )
+    params: list = [run_id]
+    if cutoff:
+        base += " AND DATE(timestamp) >= ?"
+        params.append(cutoff)
+    sql = f"""
+        SELECT
+            brand,
+            COUNT(*) AS total_posts,
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS conversation_share_pct,
+            ROUND(100.0 * SUM(CASE WHEN sentiment='Positive' THEN 1 ELSE 0 END) / COUNT(*), 1) AS positive_pct,
+            ROUND(100.0 * SUM(CASE WHEN sentiment='Neutral'  THEN 1 ELSE 0 END) / COUNT(*), 1) AS neutral_pct,
+            ROUND(100.0 * SUM(CASE WHEN sentiment='Negative' THEN 1 ELSE 0 END) / COUNT(*), 1) AS negative_pct,
+            ROUND(
+                100.0 * SUM(CASE WHEN sentiment='Positive' THEN 1 ELSE 0 END) / COUNT(*) -
+                100.0 * SUM(CASE WHEN sentiment='Negative' THEN 1 ELSE 0 END) / COUNT(*), 1
+            ) AS net_sentiment_score,
+            ROUND(100.0 * SUM(CASE WHEN intent='Complaint'      THEN 1 ELSE 0 END) / COUNT(*), 1) AS complaint_pct,
+            ROUND(100.0 * SUM(CASE WHEN intent='Inquiry'        THEN 1 ELSE 0 END) / COUNT(*), 1) AS inquiry_pct,
+            ROUND(100.0 * SUM(CASE WHEN intent='Praise'         THEN 1 ELSE 0 END) / COUNT(*), 1) AS praise_pct,
+            ROUND(100.0 * SUM(CASE WHEN intent='Recommendation' THEN 1 ELSE 0 END) / COUNT(*), 1) AS recommendation_pct,
+            ROUND(100.0 * SUM(CASE WHEN emotion='Frustration'   THEN 1 ELSE 0 END) / COUNT(*), 1) AS frustration_pct,
+            ROUND(100.0 * SUM(CASE WHEN emotion='Satisfaction'  THEN 1 ELSE 0 END) / COUNT(*), 1) AS satisfaction_pct,
+            ROUND(100.0 * SUM(CASE WHEN emotion='Confusion'     THEN 1 ELSE 0 END) / COUNT(*), 1) AS confusion_pct,
+            ROUND(100.0 * SUM(CASE WHEN emotion='Excitement'    THEN 1 ELSE 0 END) / COUNT(*), 1) AS excitement_pct
+        {base}
+        GROUP BY brand
+        ORDER BY brand
+    """
+    return _query(sql, tuple(params))
+
+
+@st.cache_data(ttl=300)
+def load_filtered_topics(run_id: str, cutoff: str | None = None) -> pd.DataFrame:
+    """When no cutoff, load from pre-aggregated top_topics. Otherwise compute from posts."""
+    if cutoff is None:
+        return _query(
+            "SELECT * FROM top_topics WHERE pipeline_run_id = ? ORDER BY brand, rank",
+            (run_id,),
+        )
+    sql = """
+        SELECT
+            brand, pillar, category, theme, topic,
+            COUNT(*) AS post_count,
+            ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY brand), 2) AS topic_share_pct,
+            0 AS is_emerging,
+            ROW_NUMBER() OVER (PARTITION BY brand ORDER BY COUNT(*) DESC) AS rank
+        FROM posts
+        WHERE pipeline_run_id = ?
+          AND DATE(timestamp) >= ?
+          AND classification_status IN ('success', 'flagged')
+          AND pillar != 'Uncategorized'
+        GROUP BY brand, pillar, category, theme, topic
+        ORDER BY brand, post_count DESC
+    """
+    return _query(sql, (run_id, cutoff))
+
+
+# ─────────────────────────────────────────────
+# Load run_meta early — needed for header dates
+# ─────────────────────────────────────────────
 run_meta     = load_run_meta(selected_run)
-tax_trend_df = load_taxonomy_trend(selected_run)
-
-if metrics_df.empty:
-    st.warning("No metrics found for this run.")
-    st.stop()
-
-tmobile = metrics_df[metrics_df["brand"] == "T-Mobile US"]
-verizon = metrics_df[metrics_df["brand"] == "Verizon"]
-att     = metrics_df[metrics_df["brand"] == "AT&T Mobility"]
-
 period_start = run_meta.get("period_start", "")[:10]
 period_end   = run_meta.get("period_end", "")[:10]
-post_count   = run_meta.get("post_count", 0)
-nss_tm  = safe_val(tmobile, "net_sentiment_score")
-nss_vz  = safe_val(verizon, "net_sentiment_score")
-nss_att = safe_val(att, "net_sentiment_score")
 
 
 # ─────────────────────────────────────────────
 # HEADER  +  inline time period filter
+# (must appear before all other data loads so
+#  cutoff_date is known when queries run)
 # ─────────────────────────────────────────────
 PERIOD_OPTIONS = {
     "Last 7 Days":  7,
@@ -446,12 +498,31 @@ cutoff_date: str | None = (
     if _period_days else None
 )
 
-# Load period-filtered breakdowns (DB queries re-run when cutoff changes)
-platform_df   = load_platform_data(selected_run, cutoff_date)
+# ─────────────────────────────────────────────
+# Load all data — queries use cutoff_date
+# ─────────────────────────────────────────────
+metrics_df   = load_filtered_brand_metrics(selected_run, cutoff_date)
+trends_df    = load_trends(selected_run)
+topics_df    = load_filtered_topics(selected_run, cutoff_date)
+insight_data = load_insight(selected_run)
+tax_trend_df = load_taxonomy_trend(selected_run)
+platform_df  = load_platform_data(selected_run, cutoff_date)
 sentiment_raw = load_sentiment_by_brand(selected_run, cutoff_date)
 
-# Filter in-memory trend frames — use pd.to_datetime for reliable comparison
-# regardless of whether the stored date is "YYYY-MM-DD" or a full datetime string
+if metrics_df.empty:
+    st.warning("No metrics found for this run.")
+    st.stop()
+
+tmobile = metrics_df[metrics_df["brand"] == "T-Mobile US"]
+verizon = metrics_df[metrics_df["brand"] == "Verizon"]
+att     = metrics_df[metrics_df["brand"] == "AT&T Mobility"]
+
+post_count = int(metrics_df["total_posts"].sum())
+nss_tm  = safe_val(tmobile, "net_sentiment_score")
+nss_vz  = safe_val(verizon, "net_sentiment_score")
+nss_att = safe_val(att, "net_sentiment_score")
+
+# Filter in-memory trend frames by cutoff
 if cutoff_date and not trends_df.empty:
     _cutoff_ts = pd.to_datetime(cutoff_date)
     trends_filt = trends_df[pd.to_datetime(trends_df["trend_date"]) >= _cutoff_ts].copy()
