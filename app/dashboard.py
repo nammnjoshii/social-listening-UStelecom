@@ -425,7 +425,11 @@ with head_col:
         unsafe_allow_html=True,
     )
 with filter_col:
-    st.markdown("<div style='padding-top:6px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='font-size:10px;font-weight:600;letter-spacing:0.08em;"
+        f"text-transform:uppercase;color:{TEXT_MUTED};margin-bottom:4px'>Time Period</div>",
+        unsafe_allow_html=True,
+    )
     selected_period = st.selectbox(
         "Time Period",
         list(PERIOD_OPTIONS.keys()),
@@ -442,13 +446,23 @@ cutoff_date: str | None = (
     if _period_days else None
 )
 
-# Load period-filtered breakdowns
+# Load period-filtered breakdowns (DB queries re-run when cutoff changes)
 platform_df   = load_platform_data(selected_run, cutoff_date)
 sentiment_raw = load_sentiment_by_brand(selected_run, cutoff_date)
 
-# Filter in-memory trend frames
-trends_filt    = trends_df[trends_df["trend_date"] >= cutoff_date] if cutoff_date and not trends_df.empty else trends_df
-tax_trend_filt = tax_trend_df[tax_trend_df["date"] >= cutoff_date] if cutoff_date and not tax_trend_df.empty else tax_trend_df
+# Filter in-memory trend frames — use pd.to_datetime for reliable comparison
+# regardless of whether the stored date is "YYYY-MM-DD" or a full datetime string
+if cutoff_date and not trends_df.empty:
+    _cutoff_ts = pd.to_datetime(cutoff_date)
+    trends_filt = trends_df[pd.to_datetime(trends_df["trend_date"]) >= _cutoff_ts].copy()
+else:
+    trends_filt = trends_df.copy()
+
+if cutoff_date and not tax_trend_df.empty:
+    _cutoff_ts = pd.to_datetime(cutoff_date)
+    tax_trend_filt = tax_trend_df[pd.to_datetime(tax_trend_df["date"]) >= _cutoff_ts].copy()
+else:
+    tax_trend_filt = tax_trend_df.copy()
 
 st.markdown(f"<hr style='border-color:{BORDER};margin:14px 0 20px'>", unsafe_allow_html=True)
 
