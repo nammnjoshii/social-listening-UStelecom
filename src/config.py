@@ -25,8 +25,6 @@ class Config:
     # Instagram: optional — requires Business account token
     instagram_access_token: str = field(default_factory=lambda: os.getenv("INSTAGRAM_ACCESS_TOKEN", ""))
     instagram_business_account_id: str = field(default_factory=lambda: os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID", ""))
-    # Twitter/X API v2: optional — requires paid Bearer Token (~$100/month)
-    twitter_bearer_token: str = field(default_factory=lambda: os.getenv("TWITTER_BEARER_TOKEN", ""))
     # opentwitter / 6551 API: optional — free token at https://6551.io/mcp
     twitter_6551_token: str = field(default_factory=lambda: os.getenv("TWITTER_TOKEN", ""))
 

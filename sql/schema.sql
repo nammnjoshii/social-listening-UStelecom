@@ -22,6 +22,37 @@ CREATE TABLE IF NOT EXISTS raw_posts (
 );
 
 -- ─────────────────────────────────────────────
+-- Cleaned posts (post-filtering, pre-brand-tag)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS cleaned_posts (
+    post_id          TEXT    NOT NULL,
+    pipeline_run_id  TEXT    NOT NULL,
+    platform         TEXT    NOT NULL,
+    timestamp        TEXT    NOT NULL,
+    normalized_text  TEXT    NOT NULL,
+    is_filtered      INTEGER NOT NULL DEFAULT 0,   -- 0=kept, 1=removed by filter
+    filter_applied   TEXT,                          -- NULL if kept, reason if filtered
+    cleaned_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (post_id, pipeline_run_id)
+);
+
+-- ─────────────────────────────────────────────
+-- Brand-tagged posts (post-brand-recognition, pre-classify)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS branded_posts (
+    post_id          TEXT    NOT NULL,
+    pipeline_run_id  TEXT    NOT NULL,
+    platform         TEXT    NOT NULL,
+    timestamp        TEXT    NOT NULL,
+    normalized_text  TEXT    NOT NULL,
+    brands           TEXT    NOT NULL DEFAULT '[]',  -- JSON array string
+    brand_confidence TEXT    NOT NULL,
+    is_multi_brand   INTEGER NOT NULL DEFAULT 0,     -- 0=False, 1=True
+    tagged_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (post_id, pipeline_run_id)
+);
+
+-- ─────────────────────────────────────────────
 -- Classified posts (one row per brand per post)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS posts (
@@ -157,3 +188,5 @@ CREATE INDEX IF NOT EXISTS idx_posts_timestamp   ON posts (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_run_id      ON posts (pipeline_run_id);
 CREATE INDEX IF NOT EXISTS idx_daily_trends_run  ON daily_trends (pipeline_run_id, trend_date);
 CREATE INDEX IF NOT EXISTS idx_top_topics_run    ON top_topics (pipeline_run_id, brand, rank);
+CREATE INDEX IF NOT EXISTS idx_cleaned_posts_run ON cleaned_posts (pipeline_run_id);
+CREATE INDEX IF NOT EXISTS idx_branded_posts_run ON branded_posts (pipeline_run_id);

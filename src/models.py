@@ -29,6 +29,7 @@ class RawPost(BaseModel):
     author_id: str = "[ANONYMIZED]"
     engagement_metrics: dict[str, int] = Field(default_factory=dict)
     brand_keywords_matched: list[str] = Field(default_factory=list)
+    is_official_account: bool = False
 
 
 class CleanPost(BaseModel):

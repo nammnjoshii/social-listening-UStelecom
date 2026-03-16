@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Generator
 
 from src.config import cfg
-from src.models import AggregatedMetrics, ExecutiveInsight, PlatformScore, PostClassification
+from src.models import (
+    AggregatedMetrics, BrandTaggedPost, CleanPost,
+    ExecutiveInsight, PlatformScore, PostClassification, RawPost,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,157 @@ def init_db() -> None:
             conn.executescript(exp_schema_path.read_text())
 
     logger.info("Database initialised at %s", _db_path())
+
+
+def write_raw_posts(posts: list[RawPost], run_id: str) -> int:
+    """Insert raw post records from ingest stage. Returns count written."""
+    if not posts:
+        return 0
+
+    rows = [(
+        p.post_id, run_id, p.platform, _ts(p.timestamp),
+        p.raw_text, p.author_id,
+        json.dumps(p.engagement_metrics),
+        json.dumps(p.brand_keywords_matched),
+    ) for p in posts]
+
+    sql = """
+        INSERT OR IGNORE INTO raw_posts (
+            post_id, pipeline_run_id, platform, timestamp,
+            raw_text, author_id, engagement_metrics, brand_keywords_matched
+        ) VALUES (?,?,?,?,?,?,?,?)
+    """
+    with get_conn() as conn:
+        conn.executemany(sql, rows)
+        written = conn.total_changes
+
+    logger.info("Wrote %d rows to raw_posts table", written)
+    return written
+
+
+def write_cleaned_posts(posts: list[CleanPost], run_id: str) -> int:
+    """Insert cleaned post records (kept posts from filter_posts output). Returns count written.
+    Filtered-out posts are implicitly raw_posts rows with no corresponding cleaned_posts row.
+    To find filtered posts: SELECT r.* FROM raw_posts r LEFT JOIN cleaned_posts c
+    USING (post_id, pipeline_run_id) WHERE c.post_id IS NULL AND r.pipeline_run_id = ?
+    """
+    if not posts:
+        return 0
+
+    rows = [(
+        p.post_id, run_id, p.platform, _ts(p.timestamp),
+        p.normalized_text, 0, p.filter_applied,
+    ) for p in posts]
+
+    sql = """
+        INSERT OR IGNORE INTO cleaned_posts (
+            post_id, pipeline_run_id, platform, timestamp,
+            normalized_text, is_filtered, filter_applied
+        ) VALUES (?,?,?,?,?,?,?)
+    """
+    with get_conn() as conn:
+        conn.executemany(sql, rows)
+        written = conn.total_changes
+
+    logger.info("Wrote %d rows to cleaned_posts table", written)
+    return written
+
+
+def write_branded_posts(posts: list[BrandTaggedPost], run_id: str) -> int:
+    """Insert brand-tagged post records (one row per post, not per brand). Returns count written."""
+    if not posts:
+        return 0
+
+    rows = [(
+        p.post_id, run_id, p.platform, _ts(p.timestamp),
+        p.normalized_text, json.dumps(p.brands),
+        p.brand_confidence, int(p.is_multi_brand),
+    ) for p in posts]
+
+    sql = """
+        INSERT OR IGNORE INTO branded_posts (
+            post_id, pipeline_run_id, platform, timestamp,
+            normalized_text, brands, brand_confidence, is_multi_brand
+        ) VALUES (?,?,?,?,?,?,?,?)
+    """
+    with get_conn() as conn:
+        conn.executemany(sql, rows)
+        written = conn.total_changes
+
+    logger.info("Wrote %d rows to branded_posts table", written)
+    return written
+
+
+def get_raw_posts_for_run(run_id: str) -> list[RawPost]:
+    """Load raw posts for a given run_id. Used to resume from the clean step.
+
+    Note: is_official_account is not persisted to DB (in-memory flag only).
+    Posts loaded here will have is_official_account=False. The official_brand_account
+    filter in clean.py is a no-op on resume; posts were filtered in the original run.
+    """
+    sql = """
+        SELECT post_id, platform, timestamp, raw_text,
+               author_id, engagement_metrics, brand_keywords_matched
+        FROM raw_posts WHERE pipeline_run_id = ?
+    """
+    with get_conn() as conn:
+        rows = conn.execute(sql, (run_id,)).fetchall()
+
+    result = [RawPost(
+        post_id=row["post_id"],
+        platform=row["platform"],
+        timestamp=row["timestamp"],
+        raw_text=row["raw_text"],
+        author_id=row["author_id"],
+        engagement_metrics=json.loads(row["engagement_metrics"]),
+        brand_keywords_matched=json.loads(row["brand_keywords_matched"]),
+    ) for row in rows]
+    logger.info("Loaded %d raw posts for run %s", len(result), run_id)
+    return result
+
+
+def get_cleaned_posts_for_run(run_id: str) -> list[CleanPost]:
+    """Load kept cleaned posts for a given run_id. Used to resume from the brand step."""
+    sql = """
+        SELECT post_id, platform, timestamp, normalized_text, filter_applied
+        FROM cleaned_posts WHERE pipeline_run_id = ? AND is_filtered = 0
+    """
+    with get_conn() as conn:
+        rows = conn.execute(sql, (run_id,)).fetchall()
+
+    result = [CleanPost(
+        post_id=row["post_id"],
+        platform=row["platform"],
+        timestamp=row["timestamp"],
+        normalized_text=row["normalized_text"],
+        signal=True,
+        filter_applied=row["filter_applied"],
+    ) for row in rows]
+    logger.info("Loaded %d cleaned posts for run %s", len(result), run_id)
+    return result
+
+
+def get_branded_posts_for_run(run_id: str) -> list[BrandTaggedPost]:
+    """Load brand-tagged posts for a given run_id. Used to resume from the classify step."""
+    sql = """
+        SELECT post_id, platform, timestamp, normalized_text,
+               brands, brand_confidence, is_multi_brand
+        FROM branded_posts WHERE pipeline_run_id = ?
+    """
+    with get_conn() as conn:
+        rows = conn.execute(sql, (run_id,)).fetchall()
+
+    result = [BrandTaggedPost(
+        post_id=row["post_id"],
+        platform=row["platform"],
+        timestamp=row["timestamp"],
+        normalized_text=row["normalized_text"],
+        brands=json.loads(row["brands"]),
+        brand_confidence=row["brand_confidence"],
+        is_multi_brand=bool(row["is_multi_brand"]),
+    ) for row in rows]
+    logger.info("Loaded %d branded posts for run %s", len(result), run_id)
+    return result
 
 
 def write_posts(records: list[PostClassification], run_id: str) -> int:

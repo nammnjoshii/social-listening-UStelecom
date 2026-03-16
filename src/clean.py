@@ -121,6 +121,11 @@ def filter_posts(
     for post in raw_posts:
         raw = post.raw_text
 
+        # 0. Official brand account — filter before content-based checks
+        if post.is_official_account:
+            stats["official_brand_account"] += 1
+            continue
+
         # 1. URL-only
         if _is_url_only(raw):
             stats["url_only"] += 1

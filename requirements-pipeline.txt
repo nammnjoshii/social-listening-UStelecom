@@ -17,6 +17,12 @@ requests>=2.31.0
 langdetect>=1.0.9          # English language detection
 datasketch>=1.6.4          # MinHash LSH for near-duplicate detection
 
+# ── Embeddings + topic discovery (optional upgrade) ───────────────────────────
+sentence-transformers>=2.7.0   # Sentence embeddings for taxonomy cosine similarity
+bertopic>=0.16.0               # Unsupervised topic discovery (HDBSCAN + embeddings)
+hdbscan>=0.8.33                # Density-based clustering used by BERTopic
+scikit-learn>=1.4.0            # Required by BERTopic (CountVectorizer, TF-IDF)
+
 # ── YouTube collection (credential-free) ──────────────────────────────────────
 youtube-comment-downloader>=0.1.68
 yt-dlp>=2024.1.1

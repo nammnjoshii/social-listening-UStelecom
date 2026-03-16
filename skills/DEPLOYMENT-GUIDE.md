@@ -33,7 +33,6 @@ This guide provides **step-by-step instructions to deploy the Claude Code social
 | `REDDIT_CLIENT_ID` | Reddit API OAuth client ID |
 | `REDDIT_CLIENT_SECRET` | Reddit API OAuth client secret |
 | `REDDIT_USER_AGENT` | Reddit API user agent string |
-| `TWITTER_BEARER_TOKEN` | X API v2 Bearer Token for recent search |
 
 **Secrets management:** Store all secrets in a secrets manager (AWS Secrets Manager, HashiCorp Vault, or equivalent). Never hardcode API keys in source files or commit them to version control.
 
@@ -138,7 +137,6 @@ This guide provides **step-by-step instructions to deploy the Claude Code social
 # Set secrets (use secrets manager in production)
 export CLAUDE_API_KEY="your_claude_api_key"
 export DB_CONNECTION="postgresql://user:password@host:5432/telecom_listening"
-export TWITTER_BEARER_TOKEN="your_twitter_bearer_token"
 export REDDIT_CLIENT_ID="your_reddit_client_id"
 export REDDIT_CLIENT_SECRET="your_reddit_client_secret"
 export REDDIT_USER_AGENT="telecom-listening/1.0"

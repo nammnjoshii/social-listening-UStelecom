@@ -1,5 +1,16 @@
 """Claude multi-label classification — async, batched, with retry.
 
+Hybrid routing (two paths per post):
+
+  FAST PATH  — sentence-transformers cosine similarity assigns Pillar + Category
+               when similarity >= SIMILARITY_THRESHOLD (~65-70% of posts).
+               Claude only resolves Theme, Topic, Sentiment, Intent, Emotion.
+               Smaller prompt → lower token cost, faster response.
+
+  FULL PATH  — full Claude call used when:
+               • embedding similarity is below threshold (ambiguous/niche post)
+               • sentence-transformers is not installed (graceful fallback)
+
 All five classification tasks (taxonomy, sentiment, intent, emotion,
 brand confirmation) are resolved in a single Claude call per post,
 per WORKFLOW.md §Step 6.
@@ -39,7 +50,7 @@ class CreditExhaustedError(Exception):
         self.classified_so_far = classified_so_far
 
 # ─────────────────────────────────────────────
-# Prompt template (unified — all 5 tasks)
+# Prompt templates
 # ─────────────────────────────────────────────
 TAXONOMY_JSON = """
 {
@@ -59,6 +70,7 @@ You are a telecom social media analyst classifying posts about T-Mobile US, Veri
 Return ONLY valid JSON. No explanation text before or after.
 """
 
+# Full prompt — used when embeddings are unavailable or below threshold
 USER_PROMPT_TEMPLATE = """\
 Classify this telecom social media post using the taxonomy below.
 
@@ -90,9 +102,64 @@ Rules:
 - confidence = Low if the post is ambiguous or barely fits the taxonomy.
 """
 
+# Reduced prompt — used when embeddings have already assigned Pillar + Category
+EMBEDDING_ASSISTED_PROMPT_TEMPLATE = """\
+Classify this telecom social media post. Pillar and Category have already been determined.
+
+Pillar: {pillar}
+Category: {category}
+
+POST (brand already detected: {brands}):
+{post_text}
+
+Return exactly this JSON. Use the Pillar and Category provided above.
+
+{{
+  "brand": "<primary brand: T-Mobile US | Verizon | AT&T Mobility | Multiple>",
+  "sentiment": "<Positive | Neutral | Negative>",
+  "intent": "<Complaint | Inquiry | Praise | Recommendation>",
+  "emotion": "<Frustration | Satisfaction | Confusion | Excitement>",
+  "pillar": "{pillar}",
+  "category": "{category}",
+  "theme": "<theme name — infer from the post>",
+  "topic": "<specific topic — be concise>",
+  "confidence": "<High | Medium | Low>"
+}}
+
+Rules:
+- Negative sentiment takes precedence in mixed posts.
+- Sarcasm: assign the intended sentiment, not the literal words.
+- If is_multi_brand is true, classify sentiment for the primary brand only.
+- confidence = Low if the post is ambiguous.
+"""
+
 
 def _build_prompt(post: BrandTaggedPost) -> str:
+    """Build the appropriate prompt — reduced (embedding-assisted) or full."""
     brand_str = ", ".join(post.brands) if post.brands else "Unknown"
+
+    # Attempt embedding classification
+    try:
+        from src.embeddings import get_classifier
+        classifier = get_classifier()
+        if classifier.available:
+            result = classifier.classify(post.normalized_text)
+            if result and result.above_threshold:
+                logger.debug(
+                    "Embedding fast path: post=%s pillar=%s (%.2f) category=%s (%.2f)",
+                    post.post_id, result.pillar, result.pillar_score,
+                    result.category, result.category_score,
+                )
+                return EMBEDDING_ASSISTED_PROMPT_TEMPLATE.format(
+                    pillar=result.pillar,
+                    category=result.category,
+                    brands=brand_str,
+                    post_text=post.normalized_text,
+                )
+    except Exception as e:
+        logger.debug("Embedding classifier error — falling back to full Claude prompt: %s", e)
+
+    # Full Claude path
     return USER_PROMPT_TEMPLATE.format(
         taxonomy=TAXONOMY_JSON,
         brands=brand_str,
@@ -122,6 +189,9 @@ async def _call_claude(
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": _build_prompt(post)}],
             )
+            if not response.content:
+                logger.warning("Claude returned empty content for post %s — marking failed", post.post_id)
+                return None
             raw = response.content[0].text.strip()
 
             # Strip markdown code fences if present
@@ -209,12 +279,24 @@ def classify_posts(
     on_batch_complete: callable = None,
 ) -> list[PostClassification]:
     """
-    Classify all posts. Processes in batches of cfg.claude_batch_size.
+    Classify all posts using hybrid embedding + Claude routing.
+    Processes in batches of cfg.claude_batch_size.
     Calls on_batch_complete(batch_results) after each batch if provided.
     Returns list of PostClassification records (including failed ones).
     """
     results: list[PostClassification] = []
     batch_size = cfg.claude_batch_size
+
+    # Pre-warm the embedding classifier once before batches begin
+    try:
+        from src.embeddings import get_classifier
+        clf = get_classifier()
+        if clf.available:
+            logger.info("Embedding classifier ready — hybrid routing enabled")
+        else:
+            logger.info("Embedding classifier unavailable — all posts via full Claude path")
+    except Exception:
+        logger.info("Embedding classifier init failed — all posts via full Claude path")
 
     logger.info("Starting classification — %d posts, batch_size=%d", len(posts), batch_size)
     start = datetime.now(timezone.utc)

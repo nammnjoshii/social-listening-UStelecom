@@ -50,8 +50,14 @@ def _preflight_credit_check() -> None:
         logger.warning("Preflight check encountered unexpected error — proceeding anyway", exc_info=True)
 
 
-def run(dry_run: bool = False, experiment: bool = False) -> str:
-    run_id = str(uuid.uuid4())
+def run(
+    dry_run: bool = False,
+    experiment: bool = False,
+    resume_run_id: str | None = None,
+    resume_from: str | None = None,  # "clean" | "brand" | "classify"
+    discover_topics: bool = False,
+) -> str:
+    run_id = resume_run_id if resume_run_id else str(uuid.uuid4())
     period_end = datetime.now(timezone.utc)
     from datetime import timedelta
     period_start = period_end - timedelta(days=cfg.lookback_days)
@@ -74,23 +80,49 @@ def run(dry_run: bool = False, experiment: bool = False) -> str:
             return run_id
 
     # ── Step 2: Ingest ───────────────────────────────────────────────
-    console.print("[cyan]Step 1/7 — Ingesting posts from all platforms...")
-    raw_posts = ingest.collect_all(run_id)
-    console.print(f"  Collected {len(raw_posts)} raw candidates")
+    if resume_from in ("clean", "brand", "classify"):
+        console.print(f"[cyan]Step 1/7 — Resuming from '{resume_from}' — loading raw_posts from DB...")
+        raw_posts = db.get_raw_posts_for_run(run_id)
+        console.print(f"  Loaded {len(raw_posts)} raw posts from DB")
+    else:
+        console.print("[cyan]Step 1/7 — Ingesting posts from all platforms...")
+        raw_posts = ingest.collect_all(run_id)
+        console.print(f"  Collected {len(raw_posts)} raw candidates")
+        if not dry_run:
+            written = db.write_raw_posts(raw_posts, run_id)
+            console.print(f"  [dim]✓ Wrote {written} raw posts to DB")
 
     # ── Step 3: Clean & normalize ─────────────────────────────────────
-    console.print("[cyan]Step 2/7 — Cleaning & noise filtering...")
-    clean_posts, filter_stats = clean.filter_posts(raw_posts)
-    console.print(f"  {len(clean_posts)} posts after filtering | stats={filter_stats}")
+    if resume_from in ("brand", "classify"):
+        console.print(f"[cyan]Step 2/7 — Resuming from '{resume_from}' — loading cleaned_posts from DB...")
+        clean_posts = db.get_cleaned_posts_for_run(run_id)
+        filter_stats: dict = {}
+        console.print(f"  Loaded {len(clean_posts)} cleaned posts from DB")
+    else:
+        console.print("[cyan]Step 2/7 — Cleaning & noise filtering...")
+        clean_posts, filter_stats = clean.filter_posts(raw_posts)
+        console.print(f"  {len(clean_posts)} posts after filtering | stats={filter_stats}")
+        if not dry_run:
+            written = db.write_cleaned_posts(clean_posts, run_id)
+            console.print(f"  [dim]✓ Wrote {written} cleaned posts to DB")
 
     if len(clean_posts) < 100:
         logger.error("Insufficient posts after cleaning (%d) — aborting", len(clean_posts))
         return run_id
 
     # ── Step 4: Brand recognition ─────────────────────────────────────
-    console.print("[cyan]Step 3/7 — Brand entity recognition...")
-    tagged_posts, unresolved = brand.tag_posts(clean_posts)
-    console.print(f"  {len(tagged_posts)} tagged | {len(unresolved)} unresolved (excluded)")
+    if resume_from == "classify":
+        console.print("[cyan]Step 3/7 — Resuming from 'classify' — loading branded_posts from DB...")
+        tagged_posts = db.get_branded_posts_for_run(run_id)
+        unresolved: list = []
+        console.print(f"  Loaded {len(tagged_posts)} branded posts from DB")
+    else:
+        console.print("[cyan]Step 3/7 — Brand entity recognition...")
+        tagged_posts, unresolved = brand.tag_posts(clean_posts)
+        console.print(f"  {len(tagged_posts)} tagged | {len(unresolved)} unresolved (excluded)")
+        if not dry_run:
+            written = db.write_branded_posts(tagged_posts, run_id)
+            console.print(f"  [dim]✓ Wrote {written} branded posts to DB")
 
     # ── Step 4b: Resume filter — skip already-classified posts ────────
     if not dry_run:
@@ -103,6 +135,14 @@ def run(dry_run: bool = False, experiment: bool = False) -> str:
             logger.info("Resume filter: %d already classified, %d remaining", skipped, len(tagged_posts))
         else:
             console.print("  [dim]Resume: no prior classifications found — classifying all posts")
+
+    # ── Step 4b: BERTopic corpus-level topic discovery (optional) ────
+    if discover_topics and tagged_posts:
+        console.print("[cyan]Step 3b — Running BERTopic topic discovery on corpus...")
+        from src.topic_discovery import discover_topics as run_bertopic, print_topic_report
+        texts = [p.normalized_text for p in tagged_posts]
+        discovered = run_bertopic(texts, label_with_claude=not dry_run)
+        print_topic_report(discovered)
 
     # ── Step 5: Classify ─────────────────────────────────────────────
     console.print("[cyan]Step 4/7 — Claude classification (async batches)...")
@@ -287,5 +327,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the telecom social listening pipeline")
     parser.add_argument("--dry-run", action="store_true", help="Skip API calls and DB writes")
     parser.add_argument("--experiment", action="store_true", help="Run platform signal quality experiment after classification")
+    parser.add_argument("--resume-run-id", type=str, default=None, help="Run ID to resume (must exist in pipeline_runs table)")
+    parser.add_argument("--resume-from", choices=["clean", "brand", "classify"], default=None, help="Stage to resume from. Requires --resume-run-id.")
+    parser.add_argument("--discover-topics", action="store_true", help="Run BERTopic unsupervised topic discovery before classification")
     args = parser.parse_args()
-    run(dry_run=args.dry_run, experiment=args.experiment)
+    run(
+        dry_run=args.dry_run,
+        experiment=args.experiment,
+        resume_run_id=args.resume_run_id,
+        resume_from=args.resume_from,
+        discover_topics=args.discover_topics,
+    )

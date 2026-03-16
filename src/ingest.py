@@ -84,6 +84,21 @@ def _keyword_matches(text: str) -> list[str]:
     return [kw for kw in BRAND_KEYWORDS if kw.lower() in lower]
 
 
+# Official brand account handles — posts FROM these accounts are brand PR/marketing,
+# not organic customer conversation, and must be filtered before analysis.
+OFFICIAL_BRAND_ACCOUNTS: frozenset[str] = frozenset({
+    "tmobile", "tmobilehelp",
+    "verizon", "vzwsupport",
+    "att", "atthelp",
+    "t-mobile", "at&t",         # YouTube channel display names (lowercase)
+})
+
+
+def _is_official_account(username: str) -> bool:
+    """Return True if username belongs to a known official brand account."""
+    return username.strip().lower() in OFFICIAL_BRAND_ACCOUNTS
+
+
 # ─────────────────────────────────────────────
 # Reddit — free public JSON API (no credentials)
 # ─────────────────────────────────────────────
@@ -136,17 +151,19 @@ class RedditCollector:
                 if not text or text == "[deleted]":
                     continue
 
+                author = d.get("author", "unknown")
                 posts.append(RawPost(
                     post_id=_make_post_id("Reddit", d["id"]),
                     platform="Reddit",
                     timestamp=created,
                     raw_text=text,
-                    author_id=_anonymize(d.get("author", "unknown")),
+                    author_id=_anonymize(author),
                     engagement_metrics={
                         "score": d.get("score", 0),
                         "num_comments": d.get("num_comments", 0),
                     },
                     brand_keywords_matched=_keyword_matches(text),
+                    is_official_account=_is_official_account(author),
                 ))
 
             after = data.get("after")
@@ -264,29 +281,79 @@ class InstagramCollector:
 # X / Twitter — paid API primary, Nitter RSS fallback
 # ─────────────────────────────────────────────
 
-# Public Nitter instances — tried in order until one succeeds.
-# Order reflects experiment results (2026-03-16):
-#   nitter.perennialte.ch → HTTP 200, RSS search works (20 tweets/query confirmed)
-#   nitter.net            → HTTP 200 homepage, search may work
-#   nitter.cz             → HTTP 200 homepage, search returns Cloudflare 403
-#   nitter.poast.org      → HTTP 503
-#   others                → DNS failure or 502
+# Public Nitter instances — probed for actual RSS search capability (not just homepage).
+# Many instances are volunteer-run and may come and go; the collector handles failures
+# gracefully and falls back to brand-account timelines when search is unavailable.
 _NITTER_INSTANCES: list[str] = [
-    "https://nitter.perennialte.ch",  # confirmed working 2026-03-16
+    "https://nitter.perennialte.ch",
     "https://nitter.net",
-    "https://nitter.it",
-    "https://nitter.cz",
     "https://nitter.privacydev.net",
     "https://nitter.poast.org",
     "https://nitter.1d4.us",
     "https://nitter.kavin.rocks",
+    "https://nitter.tiekoetter.com",
+    "https://nitter.pussthecat.org",
+    "https://nitter.weiler.rocks",
 ]
 
+# nitter.net is search-broken but timeline RSS works reliably; always use for timelines
+_NITTER_TIMELINE_BASE = "https://nitter.net"
+
 _NITTER_SEARCH_QUERIES: list[str] = [
-    "T-Mobile 5G OR T-Mobile coverage OR T-Mobile plan",
-    "Verizon 5G OR Verizon coverage OR Verizon plan",
-    "AT&T 5G OR AT&T coverage OR AT&T plan",
-    "switch carrier T-Mobile OR switch to Verizon OR switch to ATT",
+    # ── T-Mobile: network & coverage ────────────────────────────────────
+    "T-Mobile 5G coverage OR T-Mobile network issues",
+    "T-Mobile signal OR T-Mobile outage OR T-Mobile down",
+    "T-Mobile home internet OR T-Mobile WiFi calling",
+    # ── T-Mobile: plan & pricing ─────────────────────────────────────────
+    "T-Mobile plan price OR T-Mobile billing OR T-Mobile overcharge",
+    "T-Mobile unlimited OR T-Mobile deal OR T-Mobile promotion",
+    "TMobile customer service OR TMobile support complaint",
+    "Magenta plan OR Uncarrier OR TMUS network",
+    # ── T-Mobile: switching & sentiment ──────────────────────────────────
+    "switch from T-Mobile OR leave T-Mobile OR cancel T-Mobile",
+    "@TMobile frustrated OR @TMobile awful OR @TMobile worst",
+    "@TMobile great OR @TMobile love OR @TMobile best",
+    # ── Verizon: network & coverage ──────────────────────────────────────
+    "Verizon 5G coverage OR Verizon network issues",
+    "Verizon signal OR Verizon outage OR Verizon down",
+    "Verizon home internet OR VZW fios OR Verizon LTE",
+    # ── Verizon: plan & pricing ───────────────────────────────────────────
+    "Verizon plan price OR Verizon billing OR Verizon overcharge",
+    "Verizon unlimited OR VZW deal OR Verizon promotion",
+    "Verizon customer service OR VZW support complaint",
+    # ── Verizon: switching & sentiment ───────────────────────────────────
+    "switch from Verizon OR leave Verizon OR cancel Verizon",
+    "@Verizon frustrated OR @VZWSupport awful OR @Verizon worst",
+    "@Verizon great OR @Verizon love OR @Verizon best",
+    # ── AT&T: network & coverage ─────────────────────────────────────────
+    "ATT 5G coverage OR AT&T network issues",
+    "AT&T signal OR AT&T outage OR AT&T down",
+    "AT&T FirstNet OR AT&T fiber bundle OR attmobility LTE",
+    # ── AT&T: plan & pricing ──────────────────────────────────────────────
+    "ATT plan price OR AT&T billing OR AT&T overcharge",
+    "AT&T unlimited OR ATT deal OR attmobility promotion",
+    "ATT customer service OR ATT support complaint",
+    # ── AT&T: switching & sentiment ───────────────────────────────────────
+    "switch from ATT OR leave AT&T OR cancel AT&T",
+    "@ATT frustrated OR @ATTHelp awful OR @ATT worst",
+    "@ATT great OR @ATT love OR @ATT best",
+    # ── Cross-carrier comparisons ─────────────────────────────────────────
+    "T-Mobile vs Verizon vs AT&T comparison",
+    "best cell carrier US 2025 OR best wireless plan 2025",
+    "switch carrier TMobile Verizon ATT 2025",
+    "unlimited data plan comparison T-Mobile Verizon ATT",
+    "prepaid carrier T-Mobile Verizon ATT review",
+]
+
+# Official brand + support handles for timeline RSS.
+# Format: (username, canonical_brand, include_with_replies)
+# with_replies=True → also fetch /<user>/with_replies/rss (customer complaints/praise)
+_NITTER_BRAND_ACCOUNTS: list[tuple[str, str, bool]] = [
+    ("TMobile",     "T-Mobile US",    True),
+    ("TMobileHelp", "T-Mobile US",    True),   # support replies = customer issues
+    ("Verizon",     "Verizon",        True),
+    ("ATT",         "AT&T Mobility",  True),
+    ("ATTHelp",     "AT&T Mobility",  True),   # support replies = customer issues
 ]
 
 _NITTER_HEADERS = {
@@ -307,63 +374,16 @@ _6551_SEARCH_PAYLOADS: list[dict] = [
 
 class TwitterCollector:
     """
-    Collects tweets via X API v2 (paid), opentwitter/6551 API, or Nitter RSS.
+    Collects tweets via opentwitter/6551 API or Nitter RSS.
 
     Strategy (in order):
-      1. Paid API v2       — if TWITTER_BEARER_TOKEN is set in .env.
-      2. opentwitter/6551  — if TWITTER_TOKEN is set in .env.
+      1. opentwitter/6551  — if TWITTER_TOKEN is set in .env.
                              Up to 100 tweets/request, date/lang/engagement filters.
                              Get a free token at: https://6551.io/mcp
-      3. Nitter RSS        — credential-free fallback; ~20 tweets/query.
+      2. Nitter RSS        — credential-free fallback; ~20 tweets/query.
     """
 
-    # ── Strategy 1: paid API v2 ──────────────────────────────────────
-    def _collect_paid(self, limit: int) -> list[RawPost]:
-        since = _since_timestamp()
-        posts: list[RawPost] = []
-        headers = {"Authorization": f"Bearer {cfg.twitter_bearer_token}"}
-        params = {
-            "query": TWITTER_QUERY,
-            "start_time": since.isoformat(),
-            "tweet.fields": "created_at,public_metrics,author_id,text",
-            "max_results": 100,
-        }
-        try:
-            while len(posts) < limit:
-                r = requests.get(
-                    "https://api.twitter.com/2/tweets/search/recent",
-                    headers=headers,
-                    params=params,
-                    timeout=15,
-                )
-                r.raise_for_status()
-                body = r.json()
-                for tweet in body.get("data", []):
-                    metrics = tweet.get("public_metrics", {})
-                    posts.append(RawPost(
-                        post_id=_make_post_id("X", tweet["id"]),
-                        platform="X",
-                        timestamp=datetime.fromisoformat(
-                            tweet["created_at"].replace("Z", "+00:00")
-                        ),
-                        raw_text=tweet["text"],
-                        author_id=_anonymize(tweet.get("author_id", "unknown")),
-                        engagement_metrics={
-                            "like_count": metrics.get("like_count", 0),
-                            "retweet_count": metrics.get("retweet_count", 0),
-                            "reply_count": metrics.get("reply_count", 0),
-                        },
-                        brand_keywords_matched=_keyword_matches(tweet["text"]),
-                    ))
-                next_token = body.get("meta", {}).get("next_token")
-                if not next_token:
-                    break
-                params["next_token"] = next_token
-        except requests.RequestException as e:
-            logger.error("Twitter paid API error: %s", e)
-        return posts[:limit]
-
-    # ── Strategy 2: opentwitter / 6551 API ───────────────────────────
+    # ── Strategy 1: opentwitter / 6551 API ───────────────────────────
     def _collect_6551(self, limit: int) -> list[RawPost]:
         since = _since_timestamp()
         posts: list[RawPost] = []
@@ -404,18 +424,20 @@ class TwitterCollector:
                         ts = datetime.fromisoformat(tweet["createdAt"].replace("Z", "+00:00"))
                     except Exception:
                         ts = datetime.now(timezone.utc)
+                    screen_name = tweet.get("userScreenName", "unknown")
                     posts.append(RawPost(
                         post_id=post_id,
                         platform="X",
                         timestamp=ts,
                         raw_text=text,
-                        author_id=_anonymize(tweet.get("userScreenName", "unknown")),
+                        author_id=_anonymize(screen_name),
                         engagement_metrics={
                             "like_count":    tweet.get("favoriteCount", 0),
                             "retweet_count": tweet.get("retweetCount", 0),
                             "reply_count":   tweet.get("replyCount", 0),
                         },
                         brand_keywords_matched=_keyword_matches(text),
+                        is_official_account=_is_official_account(screen_name),
                     ))
             except requests.RequestException as e:
                 logger.error("X (6551) error for '%s': %s", payload["keywords"][:40], e)
@@ -424,12 +446,17 @@ class TwitterCollector:
         logger.info("X (opentwitter/6551) collected %d posts", len(posts))
         return posts[:limit]
 
-    # ── Strategy 3: Nitter RSS (credential-free) ─────────────────────
+    # ── Strategy 2: Nitter RSS (credential-free) ─────────────────────
     def _probe_nitter_instance(self, base: str) -> bool:
-        """Return True if this Nitter instance responds to a simple probe."""
+        """Return True if this Nitter instance actually returns valid RSS search results."""
         try:
-            r = requests.get(base, headers=_NITTER_HEADERS, timeout=8)
-            return r.status_code == 200
+            r = requests.get(
+                f"{base}/search/rss",
+                params={"q": "T-Mobile", "f": "tweets"},
+                headers=_NITTER_HEADERS,
+                timeout=10,
+            )
+            return r.status_code == 200 and r.content[:5] == b"<?xml"
         except Exception:
             return False
 
@@ -488,46 +515,152 @@ class TwitterCollector:
                     timestamp=ts,
                     raw_text=text,
                     author_id="nitter_anon",
-                    engagement_metrics={"source": "nitter"},
+                    engagement_metrics={},
                     brand_keywords_matched=_keyword_matches(text),
                 ))
         except Exception as e:
             logger.debug("Nitter RSS error (%s, '%s'): %s", base, query, e)
         return posts
 
-    def _collect_nitter(self, limit: int) -> list[RawPost]:
-        # Find a working Nitter instance
-        working_base: str | None = None
+    def _find_working_instances(self, max_instances: int = 3) -> list[str]:
+        """Probe all Nitter instances and return up to max_instances working ones."""
+        working: list[str] = []
         for base in _NITTER_INSTANCES:
             if self._probe_nitter_instance(base):
-                working_base = base
-                logger.info("X: using Nitter instance %s", base)
-                break
-            logger.debug("X: Nitter instance %s unreachable", base)
+                working.append(base)
+                logger.info("X: Nitter instance available: %s", base)
+                if len(working) >= max_instances:
+                    break
+            else:
+                logger.debug("X: Nitter instance %s unreachable", base)
+        return working
 
-        if not working_base:
-            logger.warning("X: all Nitter instances unreachable — skipping")
-            return []
+    def _fetch_nitter_timeline(
+        self,
+        base: str,
+        username: str,
+        brand_hint: str,
+        with_replies: bool = False,
+    ) -> list[RawPost]:
+        """Fetch the public RSS timeline for a Twitter/X account via Nitter.
 
+        brand_hint — canonical brand name (e.g. "T-Mobile US"). Tweets from an
+        official brand account that don't explicitly mention the brand keyword are
+        still on-topic; we prepend [brand_hint] so brand.py can detect them —
+        identical strategy to AppReviewCollector and YouTubeCollector.
+
+        with_replies=True fetches /<user>/with_replies/rss — captures customer
+        replies directed at the brand (complaints, praise, inquiries).
+        """
+        posts: list[RawPost] = []
+        since = _since_timestamp()
+        path = f"/{username}/with_replies/rss" if with_replies else f"/{username}/rss"
+        try:
+            r = requests.get(f"{base}{path}", headers=_NITTER_HEADERS, timeout=15)
+            if r.status_code != 200 or r.content[:5] != b"<?xml":
+                return posts
+            root = ET.fromstring(r.content)
+            channel = root.find("channel")
+            if channel is None:
+                return posts
+            for item in channel.findall("item"):
+                title_el = item.find("title")
+                desc_el  = item.find("description")
+                pub_el   = item.find("pubDate")
+                guid_el  = item.find("guid")
+
+                text = ""
+                if desc_el is not None and desc_el.text:
+                    text = re.sub(r"<[^>]+>", " ", desc_el.text).strip()
+                if not text and title_el is not None and title_el.text:
+                    text = title_el.text.strip()
+                if not text:
+                    continue
+
+                try:
+                    ts = parsedate_to_datetime(pub_el.text) if pub_el is not None else None
+                    if ts is None:
+                        ts = datetime.now(timezone.utc)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    ts = datetime.now(timezone.utc)
+
+                if ts < since:
+                    continue
+
+                matched = _keyword_matches(text)
+                if not matched:
+                    # Brand account tweet with no explicit brand keyword —
+                    # prepend brand so downstream detection works (same as YouTube/AppReview)
+                    text = f"[{brand_hint}] {text}"
+                    matched = [brand_hint]
+
+                guid = guid_el.text if guid_el is not None else text[:40]
+                suffix = "replies" if with_replies else "tl"
+                post_id = hashlib.sha256(f"{username}_{suffix}_{guid}".encode()).hexdigest()[:16]
+                posts.append(RawPost(
+                    post_id=_make_post_id("X", post_id),
+                    platform="X",
+                    timestamp=ts,
+                    raw_text=text,
+                    author_id=_anonymize(username),
+                    engagement_metrics={},
+                    brand_keywords_matched=matched,
+                    is_official_account=not with_replies,  # own timeline=True; customer reply feed=False
+                ))
+        except Exception as e:
+            logger.debug("Nitter timeline error (%s, @%s with_replies=%s): %s", base, username, with_replies, e)
+        return posts
+
+    def _collect_nitter(self, limit: int) -> list[RawPost]:
         posts: list[RawPost] = []
         seen_ids: set[str] = set()
-        for query in _NITTER_SEARCH_QUERIES:
-            if len(posts) >= limit:
-                break
-            batch = self._fetch_nitter_rss(working_base, query)
-            for p in batch:
-                if p.post_id not in seen_ids:
-                    seen_ids.add(p.post_id)
-                    posts.append(p)
-            time.sleep(2)  # polite between queries
 
-        logger.info("X (Nitter) collected %d posts", len(posts))
+        # ── Phase 1: search queries on any working search-capable instances ──
+        search_instances = self._find_working_instances(max_instances=3)
+        if search_instances:
+            for base in search_instances:
+                if len(posts) >= limit:
+                    break
+                logger.info("X: running %d search queries on %s", len(_NITTER_SEARCH_QUERIES), base)
+                for query in _NITTER_SEARCH_QUERIES:
+                    if len(posts) >= limit:
+                        break
+                    batch = self._fetch_nitter_rss(base, query)
+                    for p in batch:
+                        if p.post_id not in seen_ids:
+                            seen_ids.add(p.post_id)
+                            posts.append(p)
+                    time.sleep(1.5)
+        else:
+            logger.info("X: no search-capable Nitter instances — using timelines only")
+
+        # ── Phase 2: brand account timelines (always run; nitter.net works) ──
+        for username, brand_hint, with_replies in _NITTER_BRAND_ACCOUNTS:
+            for use_replies in ([False, True] if with_replies else [False]):
+                if len(posts) >= limit:
+                    break
+                batch = self._fetch_nitter_timeline(
+                    _NITTER_TIMELINE_BASE, username, brand_hint=brand_hint, with_replies=use_replies
+                )
+                new = 0
+                for p in batch:
+                    if p.post_id not in seen_ids:
+                        seen_ids.add(p.post_id)
+                        posts.append(p)
+                        new += 1
+                feed = "with_replies" if use_replies else "timeline"
+                logger.info("X: @%s %s → %d new posts", username, feed, new)
+                time.sleep(1.5)
+
+        logger.info(
+            "X (Nitter) collected %d posts — %d search instance(s) + %d brand account feeds",
+            len(posts), len(search_instances), len(_NITTER_BRAND_ACCOUNTS) * 2,
+        )
         return posts[:limit]
 
     def collect(self, limit: int) -> list[RawPost]:
-        if cfg.twitter_bearer_token:
-            logger.info("X: using paid API v2")
-            return self._collect_paid(limit)
         if cfg.twitter_6551_token:
             logger.info("X: using opentwitter/6551 API")
             return self._collect_6551(limit)
@@ -654,14 +787,16 @@ class YouTubeCollector:
                     else:
                         continue  # multi-brand query: skip unless brand mentioned explicitly
 
+                author = comment.get("author", "unknown")
                 posts.append(RawPost(
                     post_id=_make_post_id("YouTube", comment.get("id", f"{video_id}_{i}")),
                     platform="YouTube",
                     timestamp=ts,
                     raw_text=text,
-                    author_id=_anonymize(comment.get("author", "unknown")),
+                    author_id=_anonymize(author),
                     engagement_metrics={"votes": comment.get("votes", 0)},
                     brand_keywords_matched=matched,
+                    is_official_account=_is_official_account(author),
                 ))
         except Exception as e:
             logger.warning("YouTube comment fetch error for %s: %s", video_id, e)
