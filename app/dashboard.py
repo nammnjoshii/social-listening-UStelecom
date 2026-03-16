@@ -65,6 +65,9 @@ st.markdown(f"""
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       color: {TEXT};
   }}
+  .block-container {{
+      padding-top: 1rem !important;
+  }}
   [data-testid="stSidebar"] {{
       background: {SURFACE};
       border-right: 1px solid {BORDER};
@@ -588,39 +591,46 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # ── Competitive Intelligence ───────────────────────────────────────────
+    chart_label("Competitive Intelligence")
+    comp_data_glance = []
+    for comp in ["Verizon", "AT&T Mobility"]:
+        comp_row = metrics_df[metrics_df["brand"] == comp]
+        if comp_row.empty:
+            continue
+        nss_gap_c     = safe_val(tmobile, "net_sentiment_score") - safe_val(comp_row, "net_sentiment_score")
+        complaint_gap = safe_val(tmobile, "complaint_pct") - safe_val(comp_row, "complaint_pct")
+        comp_data_glance.append({
+            "Competitor":       comp,
+            "T-Mobile NSS":     f"{safe_val(tmobile,'net_sentiment_score'):+.1f}",
+            f"{comp} NSS":      f"{safe_val(comp_row,'net_sentiment_score'):+.1f}",
+            "NSS Gap":          f"{nss_gap_c:+.1f}",
+            "Complaint Gap":    f"{complaint_gap:+.1f}pp",
+            "T-Mobile Praise":  f"{safe_val(tmobile,'praise_pct'):.1f}%",
+            f"{comp} Praise":   f"{safe_val(comp_row,'praise_pct'):.1f}%",
+            "Verdict":          "T-Mobile leads" if nss_gap_c > 0 else "T-Mobile trails",
+        })
+    if comp_data_glance:
+        st.dataframe(pd.DataFrame(comp_data_glance), use_container_width=True, hide_index=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Strategic Recommendations ─────────────────────────────────────────
     if insight_data:
-        ic1, ic2, ic3 = st.columns(3)
-        with ic1:
-            chart_label("Top Complaints")
-            for item in insight_data.get("top_complaints", [])[:2]:
-                st.markdown(
-                    f'<div class="insight-quote" style="padding:8px 12px;margin-bottom:6px">'
-                    f'<strong style="color:{TEXT};font-style:normal;font-size:12px">{item.get("topic","")}</strong>'
-                    f'<span style="color:{TEXT_MUTED};font-size:11px;margin-left:6px">'
-                    f'{item.get("complaint_pct",0):.1f}% complaint rate</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        with ic2:
-            chart_label("Emerging Topics")
-            for item in insight_data.get("emerging_topics", [])[:2]:
-                brands_str = ", ".join(item.get("brands_affected", []))
-                st.markdown(
-                    f'<div style="background:{SURFACE};border:1px solid {BORDER};border-left:3px solid {ACCENT};'
-                    f'border-radius:0 8px 8px 0;padding:8px 12px;margin-bottom:6px;font-size:12px">'
-                    f'<strong style="color:{TEXT}">{item.get("topic","")}</strong>'
-                    f'<span style="color:{TEXT_MUTED};font-size:10px;margin-left:6px">[{brands_str}]</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        with ic3:
+        recs = insight_data.get("strategic_recommendations", [])
+        if recs:
             chart_label("Strategic Recommendations")
-            for i, rec in enumerate(insight_data.get("strategic_recommendations", [])[:3], 1):
-                short_rec = rec.split("—")[0].strip() if "—" in rec else rec[:130].strip()
+            labels = ["IMMEDIATE", "SHORT-TERM", "STRATEGIC"]
+            colors = [RED, ACCENT, GREEN]
+            for i, rec in enumerate(recs[:3]):
+                label = labels[i] if i < len(labels) else f"{i+1}."
+                color = colors[i] if i < len(colors) else SLATE
                 st.markdown(
-                    f'<div style="background:{SURFACE};border:1px solid {BORDER};border-left:3px solid {GREEN};'
-                    f'border-radius:0 8px 8px 0;padding:8px 12px;margin-bottom:6px;font-size:12px;color:{TEXT}">'
-                    f'<strong>{i}.</strong> {short_rec}</div>',
+                    f'<div style="background:{SURFACE};border:1px solid {BORDER};border-left:4px solid {color};'
+                    f'border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:8px;font-size:13px;color:{TEXT}">'
+                    f'<span style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;'
+                    f'color:{color};display:block;margin-bottom:4px">{label}</span>'
+                    f'{rec}</div>',
                     unsafe_allow_html=True,
                 )
     else:
@@ -908,8 +918,8 @@ with tab5:
 
         st.markdown("<br>", unsafe_allow_html=True)
         chart_label("Emotion Heatmap by Brand")
-        emotion_cols   = ["frustration_pct", "satisfaction_pct", "confusion_pct", "excitement_pct"]
-        emotion_labels = ["Frustration", "Satisfaction", "Confusion", "Excitement"]
+        emotion_cols   = ["frustration_pct", "confusion_pct", "satisfaction_pct", "excitement_pct"]
+        emotion_labels = ["Frustration", "Confusion", "Satisfaction", "Excitement"]
         emotion_targets = {
             "Frustration":  ("↓ target ≤ 20%",  "lower is better"),
             "Satisfaction": ("↑ target ≥ 30%",  "higher is better"),
