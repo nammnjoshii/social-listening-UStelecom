@@ -248,15 +248,17 @@ def _chart(fig: go.Figure, height: int = 280, **layout_overrides):
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
-def kpi(label: str, value: str, delta: str = "", delta_positive: bool | None = None):
+def kpi(label: str, value: str, delta: str = "", delta_positive: bool | None = None, icon: str = ""):
     css = ""
     if delta_positive is True:
         css = "pos"
     elif delta_positive is False:
         css = "neg"
     delta_html = f'<div class="kpi-delta {css}">{delta}</div>' if delta else ""
+    icon_html = f'<div style="font-size:22px;margin-bottom:4px">{icon}</div>' if icon else ""
     st.markdown(f"""
     <div class="kpi-card">
+      {icon_html}
       <div class="kpi-label">{label}</div>
       <div class="kpi-value">{value}</div>
       {delta_html}
@@ -574,20 +576,22 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 with tab1:
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        kpi("Total Posts (All Brands)", f"{total_posts:,}")
+        kpi("Total Posts (All Brands)", f"{total_posts:,}", icon="📊")
     with k2:
         kpi(
             "T-Mobile Conversation Share",
             f"{tm_share:.0f}%",
             delta=f"{tm_share - safe_val(verizon,'conversation_share_pct'):+.1f}pp vs Verizon",
             delta_positive=tm_share >= safe_val(verizon, "conversation_share_pct"),
+            icon="💬",
         )
     with k3:
         kpi(
-            "T-Mobile NSS",
+            "Net Sentiment Score (NSS)",
             f"{tm_nss:+.1f}",
             delta=f"{nss_gap_vz:+.1f} pts vs Verizon",
             delta_positive=nss_gap_vz > 0,
+            icon="📈",
         )
     with k4:
         complaint_gap = tm_complaint - safe_val(verizon, "complaint_pct")
@@ -596,6 +600,7 @@ with tab1:
             f"{tm_complaint:.1f}%",
             delta=f"{complaint_gap:+.1f}pp vs Verizon",
             delta_positive=complaint_gap < 0,
+            icon="⚠️",
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -609,15 +614,15 @@ with tab1:
         comp_row = metrics_df[metrics_df["brand"] == comp]
         if comp_row.empty:
             continue
-        nss_gap_c     = tm_nss_val - safe_val(comp_row, "net_sentiment_score")
+        comp_nss      = safe_val(comp_row, "net_sentiment_score")
+        nss_gap_c     = tm_nss_val - comp_nss
         complaint_gap = tm_cpl_val - safe_val(comp_row, "complaint_pct")
         comp_data_glance.append({
-            "vs.":          comp,
-            "T-Mob NSS":    f"{tm_nss_val:+.1f}",
-            f"{comp.split()[0]} NSS": f"{safe_val(comp_row,'net_sentiment_score'):+.1f}",
-            "NSS Edge":     f"{nss_gap_c:+.1f} pts",
-            "Complaint Edge": f"{complaint_gap:+.1f} pp",
-            "Verdict":      "✅ Leads" if nss_gap_c > 0 else "⚠️ Trails",
+            "Competitor":       comp,
+            "NSS":              f"{comp_nss:+.1f}",
+            "NSS Edge (T-Mob)": f"{nss_gap_c:+.1f} pts",
+            "Complaint Edge":   f"{complaint_gap:+.1f} pp",
+            "Verdict":          "✅ Leads" if nss_gap_c > 0 else "⚠️ Trails",
         })
     if comp_data_glance:
         st.dataframe(pd.DataFrame(comp_data_glance), use_container_width=True, hide_index=True)
