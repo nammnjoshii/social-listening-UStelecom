@@ -1043,30 +1043,6 @@ with tab6:
                 display["Share%"] = display["Share%"].apply(lambda x: f"{x:.1f}%")
                 st.dataframe(display, use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.markdown(
-        f"<div style='font-size:14px;font-weight:600;color:{TEXT};margin-bottom:10px'>Competitive Intelligence</div>",
-        unsafe_allow_html=True,
-    )
-    comp_data = []
-    for comp in ["Verizon", "AT&T Mobility"]:
-        comp_row = metrics_df[metrics_df["brand"] == comp]
-        if comp_row.empty:
-            continue
-        nss_gap_c     = safe_val(tmobile, "net_sentiment_score") - safe_val(comp_row, "net_sentiment_score")
-        complaint_gap = safe_val(tmobile, "complaint_pct") - safe_val(comp_row, "complaint_pct")
-        comp_data.append({
-            "Competitor":       comp,
-            "T-Mobile NSS":     f"{safe_val(tmobile,'net_sentiment_score'):+.1f}",
-            f"{comp} NSS":      f"{safe_val(comp_row,'net_sentiment_score'):+.1f}",
-            "NSS Gap":          f"{nss_gap_c:+.1f}",
-            "Complaint Gap":    f"{complaint_gap:+.1f}pp",
-            "T-Mobile Praise":  f"{safe_val(tmobile,'praise_pct'):.1f}%",
-            f"{comp} Praise":   f"{safe_val(comp_row,'praise_pct'):.1f}%",
-            "Verdict":          "T-Mobile leads" if nss_gap_c > 0 else "T-Mobile trails",
-        })
-    if comp_data:
-        st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
 
 
 # ── TAB 7: EXECUTIVE INSIGHTS ─────────────────────────────────────────────────
