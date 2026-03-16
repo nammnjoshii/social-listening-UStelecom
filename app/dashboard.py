@@ -112,7 +112,13 @@ st.markdown(f"""
       border: 1px solid {BORDER};
       border-radius: 12px;
       padding: 18px 22px 16px;
-      min-height: 90px;
+      min-height: 100px;
+      height: 100px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
   }}
   .kpi-label {{
       font-size: 10px;
@@ -121,6 +127,7 @@ st.markdown(f"""
       text-transform: uppercase;
       color: {TEXT_MUTED};
       margin-bottom: 6px;
+      text-align: center;
   }}
   .kpi-value {{
       font-size: 28px;
@@ -128,12 +135,14 @@ st.markdown(f"""
       letter-spacing: -1px;
       color: {TEXT};
       line-height: 1;
+      text-align: center;
   }}
   .kpi-delta {{
       font-size: 11px;
       font-weight: 500;
       color: {TEXT_MUTED};
       margin-top: 5px;
+      text-align: center;
   }}
   .kpi-delta.pos {{ color: {ACCENT}; }}
   .kpi-delta.neg {{ color: {RED}; }}
@@ -594,21 +603,21 @@ with tab1:
     # ── Competitive Intelligence ───────────────────────────────────────────
     chart_label("Competitive Intelligence")
     comp_data_glance = []
+    tm_nss_val = safe_val(tmobile, "net_sentiment_score")
+    tm_cpl_val = safe_val(tmobile, "complaint_pct")
     for comp in ["Verizon", "AT&T Mobility"]:
         comp_row = metrics_df[metrics_df["brand"] == comp]
         if comp_row.empty:
             continue
-        nss_gap_c     = safe_val(tmobile, "net_sentiment_score") - safe_val(comp_row, "net_sentiment_score")
-        complaint_gap = safe_val(tmobile, "complaint_pct") - safe_val(comp_row, "complaint_pct")
+        nss_gap_c     = tm_nss_val - safe_val(comp_row, "net_sentiment_score")
+        complaint_gap = tm_cpl_val - safe_val(comp_row, "complaint_pct")
         comp_data_glance.append({
-            "Competitor":       comp,
-            "T-Mobile NSS":     f"{safe_val(tmobile,'net_sentiment_score'):+.1f}",
-            f"{comp} NSS":      f"{safe_val(comp_row,'net_sentiment_score'):+.1f}",
-            "NSS Gap":          f"{nss_gap_c:+.1f}",
-            "Complaint Gap":    f"{complaint_gap:+.1f}pp",
-            "T-Mobile Praise":  f"{safe_val(tmobile,'praise_pct'):.1f}%",
-            f"{comp} Praise":   f"{safe_val(comp_row,'praise_pct'):.1f}%",
-            "Verdict":          "T-Mobile leads" if nss_gap_c > 0 else "T-Mobile trails",
+            "vs.":          comp,
+            "T-Mob NSS":    f"{tm_nss_val:+.1f}",
+            f"{comp.split()[0]} NSS": f"{safe_val(comp_row,'net_sentiment_score'):+.1f}",
+            "NSS Edge":     f"{nss_gap_c:+.1f} pts",
+            "Complaint Edge": f"{complaint_gap:+.1f} pp",
+            "Verdict":      "✅ Leads" if nss_gap_c > 0 else "⚠️ Trails",
         })
     if comp_data_glance:
         st.dataframe(pd.DataFrame(comp_data_glance), use_container_width=True, hide_index=True)
@@ -916,7 +925,6 @@ with tab5:
             else:
                 st.info("No trend data.")
 
-        st.markdown("<br>", unsafe_allow_html=True)
         chart_label("Emotion Heatmap by Brand")
         emotion_cols   = ["frustration_pct", "confusion_pct", "satisfaction_pct", "excitement_pct"]
         emotion_labels = ["Frustration", "Confusion", "Satisfaction", "Excitement"]
@@ -950,8 +958,9 @@ with tab5:
                 align="center",
             )
         fig.update_layout(
+            height=190,
             **_layout(
-                margin=dict(t=16, b=64, l=8, r=8),
+                margin=dict(t=16, b=52, l=8, r=8),
                 yaxis=dict(showgrid=False, zeroline=False,
                            tickfont=dict(size=11, color=TEXT_MUTED),
                            linecolor="rgba(0,0,0,0)", gridcolor=BORDER),
