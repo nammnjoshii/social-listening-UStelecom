@@ -340,7 +340,14 @@ def load_run_meta(run_id: str) -> dict:
     return df.iloc[0].to_dict() if not df.empty else {}
 
 @st.cache_data(ttl=300)
-def load_platform_data(run_id: str) -> pd.DataFrame:
+def load_platform_data(run_id: str, cutoff: str | None = None) -> pd.DataFrame:
+    if cutoff:
+        return _query(
+            "SELECT platform, brand, COUNT(*) as post_count FROM posts "
+            "WHERE pipeline_run_id = ? AND DATE(timestamp) >= ? "
+            "GROUP BY platform, brand ORDER BY platform, brand",
+            (run_id, cutoff),
+        )
     return _query(
         "SELECT platform, brand, COUNT(*) as post_count FROM posts "
         "WHERE pipeline_run_id = ? GROUP BY platform, brand ORDER BY platform, brand",
@@ -348,7 +355,13 @@ def load_platform_data(run_id: str) -> pd.DataFrame:
     )
 
 @st.cache_data(ttl=300)
-def load_sentiment_by_brand(run_id: str) -> pd.DataFrame:
+def load_sentiment_by_brand(run_id: str, cutoff: str | None = None) -> pd.DataFrame:
+    if cutoff:
+        return _query(
+            "SELECT brand, sentiment, COUNT(*) as post_count FROM posts "
+            "WHERE pipeline_run_id = ? AND DATE(timestamp) >= ? GROUP BY brand, sentiment",
+            (run_id, cutoff),
+        )
     return _query(
         "SELECT brand, sentiment, COUNT(*) as post_count FROM posts "
         "WHERE pipeline_run_id = ? GROUP BY brand, sentiment",
@@ -366,14 +379,12 @@ def load_taxonomy_trend(run_id: str) -> pd.DataFrame:
     )
 
 
-metrics_df    = load_metrics(selected_run)
-trends_df     = load_trends(selected_run)
-topics_df     = load_topics(selected_run)
-insight_data  = load_insight(selected_run)
-run_meta      = load_run_meta(selected_run)
-platform_df   = load_platform_data(selected_run)
-sentiment_raw = load_sentiment_by_brand(selected_run)
-tax_trend_df  = load_taxonomy_trend(selected_run)
+metrics_df   = load_metrics(selected_run)
+trends_df    = load_trends(selected_run)
+topics_df    = load_topics(selected_run)
+insight_data = load_insight(selected_run)
+run_meta     = load_run_meta(selected_run)
+tax_trend_df = load_taxonomy_trend(selected_run)
 
 if metrics_df.empty:
     st.warning("No metrics found for this run.")
@@ -392,17 +403,53 @@ nss_att = safe_val(att, "net_sentiment_score")
 
 
 # ─────────────────────────────────────────────
-# HEADER
+# HEADER  +  inline time period filter
 # ─────────────────────────────────────────────
-st.markdown("<h1>Telecom Social Listening Dashboard</h1>", unsafe_allow_html=True)
-st.markdown(
-    f"<div style='font-size:13px;color:{TEXT_MUTED};margin-bottom:4px'>"
-    f"Client: <strong style='color:{ACCENT}'>T-Mobile US</strong>"
-    f"&nbsp;·&nbsp; Competitors: Verizon, AT&T Mobility"
-    f"&nbsp;·&nbsp; {period_start} – {period_end}"
-    f"</div>",
-    unsafe_allow_html=True,
+PERIOD_OPTIONS = {
+    "Last 7 Days":  7,
+    "Last 15 Days": 15,
+    "Last 30 Days": 30,
+    "Last 60 Days": 60,
+    "Max":          None,
+}
+
+head_col, filter_col = st.columns([5, 1])
+with head_col:
+    st.markdown("<h1>Telecom Social Listening Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='font-size:13px;color:{TEXT_MUTED};margin-bottom:4px'>"
+        f"Client: <strong style='color:{ACCENT}'>T-Mobile US</strong>"
+        f"&nbsp;·&nbsp; Competitors: Verizon, AT&T Mobility"
+        f"&nbsp;·&nbsp; {period_start} – {period_end}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+with filter_col:
+    st.markdown("<div style='padding-top:6px'></div>", unsafe_allow_html=True)
+    selected_period = st.selectbox(
+        "Time Period",
+        list(PERIOD_OPTIONS.keys()),
+        index=4,
+        label_visibility="collapsed",
+        key="time_period",
+    )
+
+# Compute cutoff date from selection
+_period_days = PERIOD_OPTIONS[selected_period]
+_period_end_dt = pd.to_datetime(period_end) if period_end else pd.Timestamp.now()
+cutoff_date: str | None = (
+    (_period_end_dt - pd.Timedelta(days=_period_days)).strftime("%Y-%m-%d")
+    if _period_days else None
 )
+
+# Load period-filtered breakdowns
+platform_df   = load_platform_data(selected_run, cutoff_date)
+sentiment_raw = load_sentiment_by_brand(selected_run, cutoff_date)
+
+# Filter in-memory trend frames
+trends_filt    = trends_df[trends_df["trend_date"] >= cutoff_date] if cutoff_date and not trends_df.empty else trends_df
+tax_trend_filt = tax_trend_df[tax_trend_df["date"] >= cutoff_date] if cutoff_date and not tax_trend_df.empty else tax_trend_df
+
 st.markdown(f"<hr style='border-color:{BORDER};margin:14px 0 20px'>", unsafe_allow_html=True)
 
 
@@ -491,10 +538,10 @@ st.markdown("<h2>Sentiment Trend</h2>", unsafe_allow_html=True)
 
 s1, s2 = st.columns([2, 1])
 with s1:
-    chart_label("10-Week Net Sentiment Trend")
-    if not trends_df.empty:
+    chart_label(f"Net Sentiment Trend — {selected_period}")
+    if not trends_filt.empty:
         fig = px.line(
-            trends_df, x="trend_date", y="net_sentiment_score",
+            trends_filt, x="trend_date", y="net_sentiment_score",
             color="brand", color_discrete_map=BRAND_COLORS, markers=True,
             labels={"net_sentiment_score": "NSS", "trend_date": "", "brand": ""},
         )
@@ -618,14 +665,14 @@ for tab, brand_name, brand_color in zip(
 # ─────────────────────────────────────────────
 # SECTION 5: TREND ANALYSIS
 # ─────────────────────────────────────────────
-st.markdown("<h2>Trend Analysis (10 Weeks)</h2>", unsafe_allow_html=True)
+st.markdown(f"<h2>Trend Analysis — {selected_period}</h2>", unsafe_allow_html=True)
 
 t1, t2 = st.columns(2)
 with t1:
     chart_label("Conversation Volume Trend")
-    if not trends_df.empty:
+    if not trends_filt.empty:
         fig = px.line(
-            trends_df, x="trend_date", y="post_count",
+            trends_filt, x="trend_date", y="post_count",
             color="brand", color_discrete_map=BRAND_COLORS, markers=True,
             labels={"post_count": "Posts", "trend_date": "", "brand": ""},
         )
@@ -636,9 +683,9 @@ with t1:
 
 with t2:
     chart_label("Complaint Trend")
-    if not trends_df.empty:
+    if not trends_filt.empty:
         fig = px.area(
-            trends_df, x="trend_date", y="complaint_pct",
+            trends_filt, x="trend_date", y="complaint_pct",
             color="brand", color_discrete_map=BRAND_COLORS,
             labels={"complaint_pct": "Complaint %", "trend_date": "", "brand": ""},
             line_group="brand",
@@ -651,8 +698,8 @@ with t2:
 t3, t4 = st.columns(2)
 with t3:
     chart_label("Frustration vs Satisfaction Trend")
-    if not trends_df.empty:
-        emotion_trend_df = trends_df.melt(
+    if not trends_filt.empty:
+        emotion_trend_df = trends_filt.melt(
             id_vars=["trend_date", "brand"],
             value_vars=["frustration_pct", "satisfaction_pct"],
             var_name="emotion", value_name="pct",
@@ -712,9 +759,9 @@ if not topics_df.empty:
 
         with p2:
             chart_label("Pillar Trend Over Time")
-            if not tax_trend_df.empty:
+            if not tax_trend_filt.empty:
                 pillar_trend = (
-                    tax_trend_df[tax_trend_df["pillar"] != "Uncategorized"]
+                    tax_trend_filt[tax_trend_filt["pillar"] != "Uncategorized"]
                     .groupby(["date", "pillar"], as_index=False)["post_count"].sum()
                 )
                 # Keep top 5 pillars by total volume
@@ -759,9 +806,9 @@ if not topics_df.empty:
 
         with c2:
             chart_label("Category Trend Over Time (Top 5)")
-            if not tax_trend_df.empty:
+            if not tax_trend_filt.empty:
                 cat_trend = (
-                    tax_trend_df[tax_trend_df["category"] != "Uncategorized"]
+                    tax_trend_filt[tax_trend_filt["category"] != "Uncategorized"]
                     .groupby(["date", "category"], as_index=False)["post_count"].sum()
                 )
                 top5_cats = (
@@ -805,11 +852,11 @@ if not topics_df.empty:
 
             with th2:
                 chart_label("Theme Trend Over Time (Top 5)")
-                if not tax_trend_df.empty and "theme" in tax_trend_df.columns:
+                if not tax_trend_filt.empty and "theme" in tax_trend_filt.columns:
                     theme_trend = (
-                        tax_trend_df[
-                            (tax_trend_df["theme"] != "Uncategorized") &
-                            (tax_trend_df["theme"].notna())
+                        tax_trend_filt[
+                            (tax_trend_filt["theme"] != "Uncategorized") &
+                            (tax_trend_filt["theme"].notna())
                         ].groupby(["date", "theme"], as_index=False)["post_count"].sum()
                     )
                     top5_themes = (
