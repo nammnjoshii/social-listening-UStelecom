@@ -138,14 +138,28 @@ st.markdown(f"""
       background: {SURFACE};
       border: 1px solid {BORDER};
       border-radius: 12px;
-      padding: 18px 22px 16px;
+      padding: 16px 20px;
       min-height: 100px;
       height: 100px;
-      text-align: center;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+  }}
+  .kpi-icon {{
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: {BG};
+  }}
+  .kpi-text {{
       display: flex;
       flex-direction: column;
       justify-content: center;
-      align-items: center;
   }}
   .kpi-label {{
       font-size: 10px;
@@ -153,23 +167,20 @@ st.markdown(f"""
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: {TEXT_MUTED};
-      margin-bottom: 6px;
-      text-align: center;
+      margin-bottom: 4px;
   }}
   .kpi-value {{
-      font-size: 28px;
+      font-size: 26px;
       font-weight: 700;
       letter-spacing: -1px;
       color: {TEXT};
       line-height: 1;
-      text-align: center;
   }}
   .kpi-delta {{
       font-size: 11px;
       font-weight: 500;
       color: {TEXT_MUTED};
-      margin-top: 5px;
-      text-align: center;
+      margin-top: 4px;
   }}
   .kpi-delta.pos {{ color: {ACCENT}; }}
   .kpi-delta.neg {{ color: {RED}; }}
@@ -282,13 +293,15 @@ def kpi(label: str, value: str, delta: str = "", delta_positive: bool | None = N
     elif delta_positive is False:
         css = "neg"
     delta_html = f'<div class="kpi-delta {css}">{delta}</div>' if delta else ""
-    icon_html = f'<div style="margin-bottom:6px;line-height:1">{icon}</div>' if icon else ""
+    icon_html = f'<div class="kpi-icon">{icon}</div>' if icon else ""
     st.markdown(f"""
     <div class="kpi-card">
       {icon_html}
-      <div class="kpi-label">{label}</div>
-      <div class="kpi-value">{value}</div>
-      {delta_html}
+      <div class="kpi-text">
+        <div class="kpi-label">{label}</div>
+        <div class="kpi-value">{value}</div>
+        {delta_html}
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
